@@ -12,6 +12,9 @@ real-time engine in plain C. Read `README.md` first.
 - **Branches:** `test` is the playground, `dev` is staging for final adjustments, `main`
   is shipped. New work is committed to `test`; it goes to `dev` when it's finished and
   tested, and `dev` goes to `main` only when Philip says so.
+- **Two GitHub repos.** `origin` is the private `philpiano/Crossover_Dev` (all branches).
+  `public` is `philpiano/crossover`: only `main`, and only on Philip's say-so. If
+  Philip edits the public README on GitHub, pull it and diff before publishing.
 - **Build and test with `./build.sh`** (Command Line Tools only). It runs the engine
   self-test first and won't build if a test fails. `./build.sh test` runs the tests alone.
 - **The audio thread is sacred.** Nothing in `Sources/SplitCore` may allocate, lock, log
