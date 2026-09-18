@@ -35,7 +35,7 @@ private func khz(_ rate: Double) -> String {
 /// and going, sample-rate changes, sleep/wake and a stalled audio thread all
 /// end in an automatic rebuild.
 final class EngineController {
-    static let aggregateUIDPrefix = "com.philipwarda.audiosplitangel.engine"
+    static let aggregateUIDPrefix = "com.philipwarda.crossover.engine"
 
     let core: OpaquePointer
 
@@ -44,7 +44,7 @@ final class EngineController {
     var onOverload: (() -> Void)?
     var onSystemDevicesChanged: (() -> Void)?
 
-    private let hal = DispatchQueue(label: "com.philipwarda.audiosplitangel.hal", qos: .userInteractive)
+    private let hal = DispatchQueue(label: "com.philipwarda.crossover.hal", qos: .userInteractive)
 
     private struct Topology: Equatable {
         var input: Endpoint
@@ -193,11 +193,13 @@ final class EngineController {
         for (k, edge) in cfg.edges.prefix(SplitConfig.edgeCount).enumerated() {
             sc_engine_set_edge(core, Int32(k), Float(edge.hz), Int32(edge.slope))
         }
+        sc_engine_set_bands_enabled(core, cfg.enabledMask)
         let isVirtual: (String) -> Bool = { self.virtualUIDs.contains($0) }
         for (b, band) in cfg.bands.prefix(SplitConfig.bandCount).enumerated() {
             let feedback = SplitConfig.isFeedback(input: cfg.input, output: band.output, isVirtual: isVirtual)
             sc_engine_set_band_gain(core, Int32(b), feedback ? 0 : linearGain(band.gainDB))
             sc_engine_set_band_mute(core, Int32(b), !cfg.isAudible(b))
+            sc_engine_set_band_invert(core, Int32(b), band.inverted)
         }
     }
 
@@ -258,7 +260,7 @@ final class EngineController {
         if let uid = cfg.input.deviceUID, byUID[uid] == nil {
             warnings.append("Input: \(cfg.input.deviceName ?? "device") is not connected")
         }
-        for (b, band) in cfg.bands.enumerated() {
+        for (b, band) in cfg.bands.enumerated() where band.enabled {
             guard let uid = band.output.deviceUID else { continue }
             if byUID[uid] == nil {
                 warnings.append("\(SplitConfig.bandNames[b]): \(band.output.deviceName ?? "device") is not connected")
@@ -297,7 +299,7 @@ final class EngineController {
              kAudioSubDeviceDriftCompensationKey: uid == clock ? 0 : 1]
         }
         let description: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Audio Split Angel Engine",
+            kAudioAggregateDeviceNameKey: "Crossover Engine",
             kAudioAggregateDeviceUIDKey: "\(Self.aggregateUIDPrefix).\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: 1,
             kAudioAggregateDeviceIsStackedKey: 0,
@@ -324,7 +326,7 @@ final class EngineController {
         CA.set(agg, CA.addr(kAudioDevicePropertyBufferFrameSize), UInt32(frames))
 
         guard streamsAreFloat32(agg) else {
-            return fail("A device uses a sample format Audio Split Angel can't handle", warnings)
+            return fail("A device uses a sample format Crossover can't handle", warnings)
         }
 
         // The aggregate lays channels out device by device, in sub-device order.
@@ -494,7 +496,7 @@ final class EngineController {
     /// notifications to be delivered. If listeners ran on `hal` while `hal` was
     /// inside such a call, both would wait on each other forever. So listeners get
     /// their own queue and only ever hand work to `hal` asynchronously.
-    private let notifyQueue = DispatchQueue(label: "com.philipwarda.audiosplitangel.notify")
+    private let notifyQueue = DispatchQueue(label: "com.philipwarda.crossover.notify")
 
     private func listen(_ object: AudioObjectID, _ selector: AudioObjectPropertySelector,
                         _ handler: @escaping () -> Void) -> Listener? {

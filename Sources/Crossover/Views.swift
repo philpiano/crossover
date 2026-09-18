@@ -2,46 +2,82 @@ import AppKit
 import AVFoundation
 import SwiftUI
 
-enum Palette {
-    static let bands: [Color] = [
+/// Light, dark, or whatever the Mac is set to. Chosen in Settings (the gear).
+enum Appearance: String, CaseIterable {
+    case light, dark, system
+
+    static let key = "Crossover.Appearance"
+    static var current: Appearance { Appearance(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .dark }
+
+    func apply() {
+        switch self {
+        case .light: NSApp.appearance = NSAppearance(named: .aqua)
+        case .dark: NSApp.appearance = NSAppearance(named: .darkAqua)
+        case .system: NSApp.appearance = nil
+        }
+    }
+}
+
+/// The app's colours, for the light or dark look.
+struct Palette {
+    let dark: Bool
+
+    init(_ scheme: ColorScheme) { dark = scheme == .dark }
+
+    static let darkBands: [Color] = [
         Color(red: 1.00, green: 0.38, blue: 0.40), // low: coral
         Color(red: 1.00, green: 0.72, blue: 0.30), // mid: amber
         Color(red: 0.27, green: 0.85, blue: 0.56), // mid-high: green
         Color(red: 0.33, green: 0.65, blue: 1.00), // high: blue
     ]
-    static let window = Color(red: 0.085, green: 0.09, blue: 0.105)
-    static let panel = Color(red: 0.125, green: 0.13, blue: 0.15)
-    static let graph = Color(red: 0.055, green: 0.06, blue: 0.075)
-    static let line = Color.white.opacity(0.08)
+    // The same hues, deeper, so they read on white.
+    static let lightBands: [Color] = [
+        Color(red: 0.91, green: 0.25, blue: 0.29),
+        Color(red: 0.90, green: 0.55, blue: 0.04),
+        Color(red: 0.10, green: 0.66, blue: 0.40),
+        Color(red: 0.16, green: 0.46, blue: 0.93),
+    ]
+
+    var bands: [Color] { dark ? Self.darkBands : Self.lightBands }
+    var window: Color { dark ? Color(red: 0.085, green: 0.09, blue: 0.105) : Color(red: 0.925, green: 0.93, blue: 0.945) }
+    var panel: Color { dark ? Color(red: 0.125, green: 0.13, blue: 0.15) : .white }
+    var graph: Color { dark ? Color(red: 0.055, green: 0.06, blue: 0.075) : Color(red: 0.985, green: 0.987, blue: 0.99) }
+    /// Lines, text and marks drawn over the graph, used with opacity.
+    var ink: Color { dark ? .white : .black }
+    var line: Color { ink.opacity(0.08) }
 }
 
 /// The main window, top to bottom as the sound flows: the input, the split, the outputs.
 struct ContentView: View {
     @EnvironmentObject var model: SplitModel
+    @Environment(\.colorScheme) private var scheme
+
+    /// Below this the window refuses to get narrower: every control still fits.
+    static let minWidth: CGFloat = 1010
 
     var body: some View {
+        let pal = Palette(scheme)
         VStack(spacing: 0) {
             TopBar()
             if model.micPermission == .denied || model.micPermission == .restricted {
                 MicBanner()
             }
             CrossoverGraph()
-                .frame(minHeight: 300)
+                .frame(minHeight: 260)
                 .padding(.horizontal, 16)
                 .padding(.top, 14)
             EdgeRow()
                 .padding(.horizontal, 16)
                 .padding(.top, 12)
             HStack(spacing: 12) {
-                ForEach(0..<SplitConfig.bandCount, id: \.self) { BandCard(band: $0) }
+                ForEach(model.config.enabledBands, id: \.self) { BandCard(band: $0) }
             }
             .padding(.horizontal, 16)
             .padding(.top, 12)
             .padding(.bottom, 16)
         }
-        .frame(minWidth: 1040, minHeight: 720)
-        .background(Palette.window)
-        .preferredColorScheme(.dark)
+        .frame(minWidth: Self.minWidth, minHeight: 680)
+        .background(pal.window)
     }
 }
 
@@ -70,28 +106,34 @@ struct LogoMark: View {
 struct TopBar: View {
     @EnvironmentObject var model: SplitModel
     @EnvironmentObject var meters: MeterStore
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        HStack(spacing: 14) {
-            LogoMark(size: 34)
+        let pal = Palette(scheme)
+        HStack(spacing: 10) {
+            LogoMark(size: 36)
             VStack(alignment: .leading, spacing: 1) {
-                Text("Audio Split Angel").font(.system(size: 16, weight: .semibold))
+                Text("Crossover").font(.system(size: 16, weight: .semibold))
                 Text("One input, four speaker sets").font(.caption).foregroundColor(.secondary)
             }
             .fixedSize()
-            Divider().frame(height: 30).padding(.horizontal, 4)
-            Text("INPUT").font(.caption.weight(.semibold)).foregroundColor(.secondary)
-            EndpointPicker(end: $model.config.input, isInput: true)
+            Divider().frame(height: 30)
+            Text("INPUT").font(.caption.weight(.semibold)).foregroundColor(.secondary).fixedSize()
+            // The input takes whatever room the status leaves it.
+            EndpointPicker(end: $model.config.input, isInput: true, deviceWidth: 140...420)
             HealthDot(health: model.inputHealth())
-            LevelMeter(levels: meters.input, stereo: model.config.input.stereo, color: .white.opacity(0.85))
-                .frame(width: 110, height: 12)
-            Spacer(minLength: 12)
+            LevelMeter(levels: meters.input, stereo: model.config.input.stereo, color: pal.ink.opacity(0.8))
+                .frame(minWidth: 50, idealWidth: 100, maxWidth: 110)
+                .frame(height: 12)
+            Spacer(minLength: 8)
             EngineStatusView()
+                .fixedSize()
+                .layoutPriority(1)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(Palette.panel)
-        .overlay(Rectangle().fill(Palette.line).frame(height: 1), alignment: .bottom)
+        .background(pal.panel)
+        .overlay(Rectangle().fill(pal.line).frame(height: 1), alignment: .bottom)
     }
 }
 
@@ -163,11 +205,12 @@ struct EngineStatusView: View {
                 Image(systemName: "gearshape")
             }
             .buttonStyle(.borderless)
-            .help("Sample rate, buffer size and clock")
+            .help("Appearance, sample rate, buffer size and clock")
             .popover(isPresented: $showSettings, arrowEdge: .bottom) {
                 SettingsView().environmentObject(model).padding(16).frame(width: 360)
             }
         }
+        .lineLimit(1)
     }
 
     static func color(_ state: EngineStatus.State) -> Color {
@@ -228,9 +271,23 @@ struct StatusListButton: View {
 
 struct SettingsView: View {
     @EnvironmentObject var model: SplitModel
+    @AppStorage(Appearance.key) private var appearance = Appearance.dark.rawValue
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text("Appearance").font(.headline)
+                Spacer()
+                Picker("", selection: $appearance) {
+                    Image(systemName: "sun.max.fill").help("Light").tag(Appearance.light.rawValue)
+                    Image(systemName: "moon.fill").help("Dark").tag(Appearance.dark.rawValue)
+                    Image(systemName: "desktopcomputer").help("Same as the Mac").tag(Appearance.system.rawValue)
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 150)
+            }
+            Divider()
             Text("Engine").font(.headline)
             Picker("Sample rate", selection: $model.config.sampleRate) {
                 ForEach([44100.0, 48000.0, 88200.0, 96000.0], id: \.self) { Text("\(Int($0)) Hz").tag($0) }
@@ -251,6 +308,7 @@ struct SettingsView: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .onChange(of: appearance) { Appearance(rawValue: $0)?.apply() }
     }
 }
 
@@ -269,6 +327,7 @@ struct LevelMeter: View {
     let levels: [Float]
     let stereo: Bool
     var color: Color = .green
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         GeometryReader { g in
@@ -279,7 +338,7 @@ struct LevelMeter: View {
                 ForEach(0..<bars, id: \.self) { c in
                     let v = c < levels.count ? levels[c] : 0
                     ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 2).fill(Color.white.opacity(0.07))
+                        RoundedRectangle(cornerRadius: 2).fill(Palette(scheme).ink.opacity(0.08))
                         RoundedRectangle(cornerRadius: 2)
                             .fill(LinearGradient(colors: [color.opacity(0.75), color, .yellow, .red],
                                                  startPoint: .leading, endPoint: .trailing))
@@ -301,12 +360,13 @@ struct LevelMeter: View {
     }
 }
 
-/// A device and its channels, for the input or one band's output.
+/// A device and its channels, for the input or one band's output. Both menus
+/// stretch with the window, down to a minimum.
 struct EndpointPicker: View {
     @EnvironmentObject var model: SplitModel
     @Binding var end: Endpoint
     let isInput: Bool
-    var deviceWidth: CGFloat = 210
+    var deviceWidth: ClosedRange<CGFloat> = 90...CGFloat.infinity
 
     private var devices: [AudioDeviceInfo] { isInput ? model.inputDevices : model.outputDevices }
     private func channels(_ d: AudioDeviceInfo) -> Int { isInput ? d.inputChannels : d.outputChannels }
@@ -324,7 +384,8 @@ struct EndpointPicker: View {
                 }
             }
             .labelsHidden()
-            .frame(width: deviceWidth)
+            .frame(minWidth: deviceWidth.lowerBound, maxWidth: deviceWidth.upperBound)
+            .layoutPriority(1)
 
             let count = model.device(end.deviceUID).map(channels) ?? max(end.firstChannel + end.width, 2)
             Picker("", selection: Binding(
@@ -350,9 +411,143 @@ struct EndpointPicker: View {
                 }
             }
             .labelsHidden()
-            .frame(width: 78)
+            .frame(minWidth: 64, idealWidth: 80, maxWidth: 88)
             .disabled(end.deviceUID == nil)
             .help(isInput ? "Input channels" : "Output channels")
         }
+    }
+}
+
+// MARK: - Typable numbers
+
+/// A small text box that edits a number in place: Return or clicking away
+/// applies it, Escape cancels.
+struct InlineEditor: View {
+    @Binding var text: String
+    let commit: () -> Void
+    let cancel: () -> Void
+    var fontSize: CGFloat = 11
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        TextField("", text: $text)
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.center)
+            .font(.system(size: fontSize).monospacedDigit())
+            .focused($focused)
+            .onAppear { DispatchQueue.main.async { focused = true } }
+            .onSubmit(commit)
+            .onExitCommand(perform: cancel)
+            .onChange(of: focused) { if !$0 { commit() } }
+    }
+}
+
+/// A level readout. Double-click to type a value; right-click to reset to 0 dB.
+struct GainField: View {
+    let db: Double
+    let set: (Double) -> Void
+    @State private var editing = false
+    @State private var text = ""
+
+    var body: some View {
+        Group {
+            if editing {
+                InlineEditor(text: $text, commit: commit, cancel: { editing = false })
+            } else {
+                Text(dbText(db))
+                    .font(.system(size: 11).monospacedDigit())
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .contentShape(Rectangle())
+                    .onTapGesture(count: 2) {
+                        text = String(format: "%.1f", db)
+                        editing = true
+                    }
+                    .contextMenu { Button("Reset to 0 dB") { set(0) } }
+                    .help("Double-click to type a level (−6, +3.5, −inf). Right-click to reset.")
+            }
+        }
+        .frame(width: 60, height: 20)
+    }
+
+    private func commit() {
+        guard editing else { return }
+        editing = false
+        if let v = parseDB(text) { set((v * 10).rounded() / 10) }
+    }
+}
+
+/// A level slider: drag the knob (it doesn't jump), click the track to jump
+/// there, double-click the knob for 0 dB. Snaps to 0 dB as you pass it.
+struct GainSlider: View {
+    let value: Double
+    let range: ClosedRange<Double>
+    let color: Color
+    let set: (Double) -> Void
+    @Environment(\.colorScheme) private var scheme
+    @State private var grab: Double?
+    @State private var startedOnKnob = false
+    @State private var lastClick = Date.distantPast
+
+    private let knob: CGFloat = 14
+
+    var body: some View {
+        GeometryReader { g in
+            let w = g.size.width
+            let x = position(value, w)
+            let zero = position(0, w)
+            let pal = Palette(scheme)
+            ZStack(alignment: .leading) {
+                Capsule().fill(pal.ink.opacity(0.12)).frame(height: 4)
+                Capsule().fill(color.opacity(0.9)).frame(width: max(x, 0), height: 4)
+                Rectangle().fill(pal.ink.opacity(0.35)).frame(width: 1, height: 8).offset(x: zero - 0.5)
+                Circle()
+                    .fill(Color.white)
+                    .overlay(Circle().stroke(color, lineWidth: 2))
+                    .shadow(color: .black.opacity(0.3), radius: 1.5, y: 0.5)
+                    .frame(width: knob, height: knob)
+                    .offset(x: x - knob / 2)
+            }
+            .frame(height: g.size.height)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { v in
+                        if grab == nil {
+                            startedOnKnob = abs(v.startLocation.x - x) <= knob
+                            grab = startedOnKnob ? value - self.level(at: v.startLocation.x, w) : 0
+                        }
+                        let raw = self.level(at: v.location.x, w) + (grab ?? 0)
+                        set(snap(raw))
+                    }
+                    .onEnded { v in
+                        defer { grab = nil }
+                        guard startedOnKnob, abs(v.translation.width) < 3 else { return }
+                        // Two clicks on the knob close together: back to 0 dB.
+                        if Date().timeIntervalSince(lastClick) < NSEvent.doubleClickInterval {
+                            set(0)
+                            lastClick = .distantPast
+                        } else {
+                            lastClick = Date()
+                        }
+                    }
+            )
+            .help("Band level. Double-click the knob for 0 dB.")
+        }
+        .frame(height: 20)
+    }
+
+    private func position(_ v: Double, _ w: CGFloat) -> CGFloat {
+        let t = (min(max(v, range.lowerBound), range.upperBound) - range.lowerBound) / (range.upperBound - range.lowerBound)
+        return knob / 2 + CGFloat(t) * max(w - knob, 1)
+    }
+
+    private func level(at x: CGFloat, _ w: CGFloat) -> Double {
+        let t = Double((x - knob / 2) / max(w - knob, 1))
+        return range.lowerBound + min(max(t, 0), 1) * (range.upperBound - range.lowerBound)
+    }
+
+    private func snap(_ v: Double) -> Double {
+        let clamped = min(max(v, range.lowerBound), range.upperBound)
+        return abs(clamped) < 0.4 ? 0 : (clamped * 10).rounded() / 10
     }
 }

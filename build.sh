@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds Audio Split Angel.app with only the Command Line Tools (no Xcode needed).
+# Builds Crossover.app with only the Command Line Tools (no Xcode needed).
 #
-#   ./build.sh          test the engine, then build build/Audio Split Angel.app
+#   ./build.sh          test the engine, then build build/Crossover.app
 #   ./build.sh test     engine self-test only
 #
 # This script is the tested way to build. Package.swift is there for opening
@@ -13,7 +13,7 @@ ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 OUT="build"
 OBJ="$OUT/obj"
-APP="$OUT/Audio Split Angel.app"
+APP="$OUT/Crossover.app"
 mkdir -p "$OBJ"
 
 echo "› Compiling the real-time engine (C)"
@@ -33,14 +33,14 @@ clang -std=c11 -O2 -Wall -target "$TARGET" \
 echo "› Compiling the app (Swift)"
 swiftc -O -parse-as-library -target "$TARGET" \
     -I Sources/SplitCore/include \
-    Sources/AudioSplitAngel/*.swift "$OBJ/split_core.o" \
+    Sources/Crossover/*.swift "$OBJ/split_core.o" \
     -framework CoreAudio -framework AVFoundation -framework AppKit -framework SwiftUI -framework Accelerate \
-    -o "$OBJ/AudioSplitAngel"
+    -o "$OBJ/Crossover"
 
 echo "› Packaging $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$OBJ/AudioSplitAngel" "$APP/Contents/MacOS/AudioSplitAngel"
+cp "$OBJ/Crossover" "$APP/Contents/MacOS/Crossover"
 cp Resources/Logo.png "$APP/Contents/Resources/Logo.png"
 
 # The app icon, generated from the logo at every size macOS asks for.
@@ -56,20 +56,20 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Audio Split Angel</string>
-    <key>CFBundleDisplayName</key><string>Audio Split Angel</string>
-    <key>CFBundleIdentifier</key><string>com.philipwarda.audiosplitangel</string>
-    <key>CFBundleExecutable</key><string>AudioSplitAngel</string>
+    <key>CFBundleName</key><string>Crossover</string>
+    <key>CFBundleDisplayName</key><string>Crossover</string>
+    <key>CFBundleIdentifier</key><string>com.philipwarda.crossover</string>
+    <key>CFBundleExecutable</key><string>Crossover</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.1</string>
-    <key>CFBundleVersion</key><string>1</string>
-    <key>NSHumanReadableCopyright</key><string>Created by Philip Warda with the instrumental help of Claude Opus 5.0</string>
+    <key>CFBundleShortVersionString</key><string>0.2</string>
+    <key>CFBundleVersion</key><string>2</string>
+    <key>NSHumanReadableCopyright</key><string>Created by Philip Warda and Soshiant Lak with the instrumental help of Claude Opus 5.0</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Audio Split Angel splits the audio input you choose (a loopback such as BlackHole, or an interface) across your speakers.</string>
+    <string>Crossover splits the audio input you choose (a loopback such as BlackHole, or an interface) across your speakers.</string>
 </dict>
 </plist>
 PLIST

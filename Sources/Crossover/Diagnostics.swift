@@ -6,41 +6,53 @@ import SwiftUI
 
 /// Headless checks, run from Terminal:
 ///
-///   AudioSplitAngel --list-devices     every device, its UID, channels and rate
-///   AudioSplitAngel --probe            builds a real engine with the built-in speakers
-///                                      as every band's output (silent, no input, so no
-///                                      microphone prompt), checks callbacks flow,
-///                                      rebuilds at a new buffer size, and checks nothing
-///                                      is left behind
-///   AudioSplitAngel --snapshot FILE    the main window, drawn offscreen to a PNG
-///                                      (add --demo for a rig with devices and music playing)
+///   Crossover --list-devices     every device, its UID, channels and rate
+///   Crossover --probe            builds a real engine with the built-in speakers as
+///                                every band's output (silent, no input, so no
+///                                microphone prompt), checks callbacks flow, rebuilds
+///                                at a new buffer size, and checks nothing is left behind
+///   Crossover --check-model      undo/redo, presets and deleting bands, without audio
+///                                (nothing is saved)
+///   Crossover --snapshot FILE    the main window, drawn offscreen to a PNG
+///                                (--demo: a rig with devices and music playing;
+///                                 --light: the light appearance; --two-way: Mid and
+///                                 High deleted; --width N: window width)
 enum Diagnostics {
     static func run(_ args: [String]) -> Int32? {
         setlinebuf(stdout) // show progress live even when piped
         if args.contains("--list-devices") { listDevices(); return 0 }
         if args.contains("--probe") { return probe() }
+        if args.contains("--check-model") { return checkModel() }
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
-            return snapshot(to: args[i + 1], demo: args.contains("--demo"))
+            let w = args.firstIndex(of: "--width").flatMap { $0 + 1 < args.count ? Double(args[$0 + 1]) : nil }
+            return snapshot(to: args[i + 1], demo: args.contains("--demo"), light: args.contains("--light"),
+                            twoWay: args.contains("--two-way"), width: w ?? 1180)
         }
         return nil
     }
 
     /// Renders the main window offscreen to a PNG. No audio, no permission prompts.
-    static func snapshot(to path: String, demo: Bool) -> Int32 {
+    static func snapshot(to path: String, demo: Bool, light: Bool, twoWay: Bool, width: Double) -> Int32 {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory) // no Dock icon
+        // The same way Settings switches it: app-wide.
+        (light ? Appearance.light : Appearance.dark).apply()
         let model = SplitModel(live: false)
         if demo { stageDemo(model) }
+        if twoWay {
+            model.deleteBand(3)
+            model.deleteBand(1)
+        }
         let root = ContentView()
             .environmentObject(model)
             .environmentObject(model.meters)
             .environmentObject(model.spectrum)
         let hosting = NSHostingView(rootView: root)
-        let size = NSSize(width: 1180, height: 800)
+        let size = NSSize(width: width, height: 800)
         // Borderless so it can sit far off-screen without being pulled back on.
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
                               backing: .buffered, defer: false)
-        window.appearance = NSAppearance(named: .darkAqua)
+        window.appearance = NSAppearance(named: light ? .aqua : .darkAqua)
         window.contentView = hosting
         window.setFrameOrigin(NSPoint(x: -20000, y: -20000))
         window.orderFrontRegardless()
@@ -73,6 +85,7 @@ enum Diagnostics {
         }
         c.bands[0].output.stereo = false
         c.bands[0].gainDB = 2.5
+        c.bands[2].inverted = true
         c.bands[3].gainDB = -3
         model.config = c
         model.showForSnapshot(
@@ -83,7 +96,8 @@ enum Diagnostics {
                                 transport: kAudioDeviceTransportTypeVirtual, sampleRate: 48000),
                 AudioDeviceInfo(objectID: 0, uid: "demo.sapphire", name: "Focusrite Sapphire", inputChannels: 16, outputChannels: 16,
                                 transport: kAudioDeviceTransportTypeUSB, sampleRate: 48000),
-            ])
+            ],
+            presets: [Preset(name: "Club night", sound: c.sound)], current: "Club night")
         var signal = [Float](repeating: 0, count: 8192)
         var seed: UInt32 = 12345
         func noise() -> Float {
@@ -102,6 +116,78 @@ enum Diagnostics {
         }
         model.spectrum.show(signal: signal, sampleRate: 48000)
         model.meters.show(input: [0.62, 0.58], bands: [[0.71, 0], [0.42, 0.40], [0.25, 0.27], [0.12, 0.11]])
+    }
+
+    /// Undo/redo, presets and band deletion, driven the way the UI drives them.
+    static func checkModel() -> Int32 {
+        let model = SplitModel(live: false)
+        var ok = true
+        func expect(_ condition: Bool, _ what: String) {
+            print("  \(condition ? "ok  " : "FAIL") \(what)")
+            if !condition { ok = false }
+        }
+        func settle() { RunLoop.main.run(until: Date().addingTimeInterval(0.6)) }
+        model.config = SplitConfig()
+        settle()
+
+        print("Undo and redo")
+        let start = model.config
+        // A drag: many small changes in quick succession become one step.
+        for hz in stride(from: 100.0, through: 180, by: 5) { model.setEdge(1, hz: hz) }
+        settle()
+        model.config.bands[2].inverted = true
+        settle()
+        model.config.bands[0].gainDB = -6
+        settle()
+        expect(model.canUndo, "something to undo")
+        model.undo()
+        expect(model.config.bands[0].gainDB == 0 && model.config.bands[2].inverted, "undo takes back the last change only")
+        model.undo()
+        expect(!model.config.bands[2].inverted && model.config.edges[1].hz == 180, "undo takes back polarity")
+        model.undo()
+        expect(model.config == start, "a whole drag is one undo step")
+        model.redo(); model.redo(); model.redo()
+        expect(model.config.edges[1].hz == 180 && model.config.bands[2].inverted && model.config.bands[0].gainDB == -6,
+               "redo brings everything back")
+        model.undo()
+        model.config.bands[3].muted = true
+        settle()
+        expect(!model.canRedo, "a new change clears redo")
+
+        print("Deleting bands")
+        model.resetToDefaults()
+        settle()
+        model.deleteBand(3)
+        model.deleteBand(1)
+        settle()
+        let c = model.config
+        expect(c.enabledBands == [0, 2], "Low and Mid-High are left")
+        expect(c.range(of: 0) == (20, 100) && c.range(of: 2) == (100, 20000), "Mid-High now covers 100 Hz up")
+        expect(c.activeEdges == [0, 1, 4], "only the 100 Hz crossover and the outer cuts are in use")
+        expect(c.edgeName(1) == "Low | Mid-High", "the crossover is named for its bands")
+        model.deleteBand(0)
+        model.deleteBand(2)
+        expect(model.config.enabledBands.count == 1, "the last band can't be deleted")
+        model.undo()
+        expect(model.config.enabledBands == [0, 2], "undo brings the deleted band back")
+
+        print("Presets")
+        model.savePreset(named: "Two-way")
+        model.resetToDefaults()
+        settle()
+        expect(model.config.enabledBands == [0, 1, 2, 3], "reset brings every band back")
+        expect(model.presetEdited, "the preset shows as edited")
+        model.savePreset(named: "Four-way")
+        model.loadPreset("Two-way")
+        expect(model.config.enabledBands == [0, 2] && model.currentPreset == "Two-way", "loading a preset brings its bands back")
+        settle()
+        model.undo()
+        expect(model.config.enabledBands == [0, 1, 2, 3], "loading a preset can be undone")
+        model.deletePreset("Four-way")
+        expect(model.presets.map(\.name) == ["Two-way"], "delete removes it")
+
+        print(ok ? "Model checks passed." : "Model checks FAILED.")
+        return ok ? 0 : 1
     }
 
     static func listDevices() {

@@ -1,6 +1,6 @@
-# Audio Split Angel
+# Crossover
 
-A native Mac speaker splitter: one audio input, split by a four-band crossover
+A native Mac speaker splitter (repo folder: Audio_Split_Angel): one audio input, split by a four-band crossover
 (Low / Mid / Mid-High / High) and sent to four outputs. Swift/SwiftUI app,
 real-time engine in plain C. Read `README.md` first.
 
@@ -19,4 +19,6 @@ real-time engine in plain C. Read `README.md` first.
 - **The bands must sum flat.** The self-test checks the four bands add back up to the
   input at every slope; any change to the crossover tree must keep that passing. The
   display draws `sc_band_response_db`, which is checked against the running engine.
+- **`build/Crossover.app/Contents/MacOS/Crossover --check-model`** checks undo/redo,
+  presets and band deletion; run it after touching `SplitModel` or `SplitConfig`.
 - **Bump `CFBundleVersion` in `build.sh`** for every build handed to Philip.

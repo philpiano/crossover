@@ -36,8 +36,14 @@ final class SplitModel: ObservableObject {
             guard config != oldValue else { return }
             engine.update(config: config)
             scheduleSave()
+            if !restoring { noteChange(from: oldValue) }
         }
     }
+    @Published private(set) var canUndo = false
+    @Published private(set) var canRedo = false
+    @Published private(set) var presets: [Preset] = []
+    /// The preset last loaded or saved, if any.
+    @Published private(set) var currentPreset: String?
     @Published private(set) var devices: [AudioDeviceInfo] = []
     @Published private(set) var status = EngineStatus()
     @Published private(set) var overloads = 0
@@ -49,15 +55,22 @@ final class SplitModel: ObservableObject {
     private var saveItem: DispatchWorkItem?
     private var activity: NSObjectProtocol?
     private var observers: [NSObjectProtocol] = []
+    /// false for snapshots and checks: nothing is saved.
+    private let live: Bool
 
     /// `live: false` builds the model for a UI snapshot: no audio, no permission
     /// prompt, nothing saved.
     init(live: Bool = true) {
+        self.live = live
         meters = MeterStore(core: engine.core, live: live)
         spectrum = SpectrumStore(core: engine.core, live: live)
         let found = AudioDeviceInfo.all()
         devices = found
         config = SplitConfig.load() ?? SplitConfig.makeDefault(devices: found)
+        presets = live ? PresetStore.load() : []
+        currentPreset = UserDefaults.standard.string(forKey: Self.currentPresetKey).flatMap { name in
+            presets.contains { $0.name == name } ? name : nil
+        }
         micPermission = AVCaptureDevice.authorizationStatus(for: .audio) // reading it never prompts
         guard live else { return }
         SplitModel.current = self
@@ -97,9 +110,11 @@ final class SplitModel: ObservableObject {
     func resetOverloads() { overloads = 0 }
 
     /// Snapshots only: show a running engine and stand-in devices. Nothing starts.
-    func showForSnapshot(_ status: EngineStatus, devices: [AudioDeviceInfo]) {
+    func showForSnapshot(_ status: EngineStatus, devices: [AudioDeviceInfo], presets: [Preset] = [], current: String? = nil) {
         self.status = status
         self.devices = devices
+        self.presets = presets
+        currentPreset = current
         micPermission = .authorized
     }
 
@@ -158,6 +173,106 @@ final class SplitModel: ObservableObject {
 
     func resetToDefaults() { config.resetToDefaults() }
 
+    func deleteBand(_ b: Int) { config.deleteBand(b) }
+
+    // MARK: - Undo
+
+    // Undo works on whole snapshots of the config. Changes that follow each
+    // other closely (a drag, a stream of typing) settle into one step.
+    private var undoStack: [SplitConfig] = []
+    private var redoStack: [SplitConfig] = []
+    private var pendingBase: SplitConfig?
+    private var settleItem: DispatchWorkItem?
+    private var restoring = false
+    private static let undoLimit = 200
+
+    private func noteChange(from old: SplitConfig) {
+        if pendingBase == nil { pendingBase = old }
+        settleItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in self?.settle() }
+        settleItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: item)
+        if !canUndo { canUndo = true }
+    }
+
+    private func settle() {
+        settleItem?.cancel()
+        settleItem = nil
+        if let base = pendingBase, base != config {
+            undoStack.append(base)
+            if undoStack.count > Self.undoLimit { undoStack.removeFirst() }
+            redoStack.removeAll()
+        }
+        pendingBase = nil
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    func undo() {
+        settle()
+        guard let previous = undoStack.popLast() else { return NSSound.beep() }
+        redoStack.append(config)
+        restore(previous)
+    }
+
+    func redo() {
+        settle()
+        guard let next = redoStack.popLast() else { return NSSound.beep() }
+        undoStack.append(config)
+        restore(next)
+    }
+
+    private func restore(_ c: SplitConfig) {
+        restoring = true
+        config = c
+        restoring = false
+        canUndo = !undoStack.isEmpty
+        canRedo = !redoStack.isEmpty
+    }
+
+    // MARK: - Presets
+
+    private static let currentPresetKey = "Crossover.CurrentPreset"
+
+    /// Whether the sound differs from the current preset as saved.
+    var presetEdited: Bool {
+        guard let name = currentPreset, let p = presets.first(where: { $0.name == name }) else { return false }
+        return p.sound != config.sound
+    }
+
+    func nextPresetName() -> String {
+        var n = presets.count + 1
+        while presets.contains(where: { $0.name == "Preset \(n)" }) { n += 1 }
+        return "Preset \(n)"
+    }
+
+    /// Saves the current sound under a name, replacing a preset of that name.
+    func savePreset(named raw: String) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        let preset = Preset(name: name, sound: config.sound)
+        if let i = presets.firstIndex(where: { $0.name == name }) { presets[i] = preset } else { presets.append(preset) }
+        setCurrentPreset(name)
+        if live { PresetStore.save(presets) }
+    }
+
+    func loadPreset(_ name: String) {
+        guard let p = presets.first(where: { $0.name == name }) else { return }
+        config.sound = p.sound
+        setCurrentPreset(name)
+    }
+
+    func deletePreset(_ name: String) {
+        presets.removeAll { $0.name == name }
+        if currentPreset == name { setCurrentPreset(nil) }
+        if live { PresetStore.save(presets) }
+    }
+
+    private func setCurrentPreset(_ name: String?) {
+        currentPreset = name
+        if live { UserDefaults.standard.set(name, forKey: Self.currentPresetKey) }
+    }
+
     // MARK: - Permission
 
     func checkMicPermission() {
@@ -174,6 +289,7 @@ final class SplitModel: ObservableObject {
     // MARK: - Saving
 
     private func scheduleSave() {
+        guard live else { return }
         saveItem?.cancel()
         let item = DispatchWorkItem { [weak self] in self?.config.save() }
         saveItem = item

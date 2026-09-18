@@ -2,10 +2,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "AudioSplitAngel",
+    name: "Crossover",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "AudioSplitAngel", targets: ["AudioSplitAngel"]),
+        .executable(name: "Crossover", targets: ["Crossover"]),
     ],
     targets: [
         // Real-time crossover engine. Plain C: no allocation, no locks, no Swift runtime on the audio thread.
@@ -15,7 +15,7 @@ let package = Package(
         ),
         // SwiftUI app + Core Audio device/aggregate management.
         .executableTarget(
-            name: "AudioSplitAngel",
+            name: "Crossover",
             dependencies: ["SplitCore"],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
