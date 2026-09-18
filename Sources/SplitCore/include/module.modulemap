@@ -1,0 +1,4 @@
+module SplitCore {
+    header "SplitCore.h"
+    export *
+}

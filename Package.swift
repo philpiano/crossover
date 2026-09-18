@@ -2,31 +2,32 @@
 import PackageDescription
 
 let package = Package(
-    name: "AudioAngel",
+    name: "AudioSplitAngel",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "AudioAngel", targets: ["AudioAngel"]),
+        .executable(name: "AudioSplitAngel", targets: ["AudioSplitAngel"]),
     ],
     targets: [
-        // Real-time mixing engine. Plain C: no allocation, no locks, no Swift runtime on the audio thread.
+        // Real-time crossover engine. Plain C: no allocation, no locks, no Swift runtime on the audio thread.
         .target(
-            name: "RouterCore",
+            name: "SplitCore",
             linkerSettings: [.linkedFramework("CoreAudio")]
         ),
         // SwiftUI app + Core Audio device/aggregate management.
         .executableTarget(
-            name: "AudioAngel",
-            dependencies: ["RouterCore"],
+            name: "AudioSplitAngel",
+            dependencies: ["SplitCore"],
             linkerSettings: [
                 .linkedFramework("CoreAudio"),
                 .linkedFramework("AVFoundation"),
                 .linkedFramework("AppKit"),
+                .linkedFramework("Accelerate"),
             ]
         ),
-        // Deterministic tests for the mixing engine (runs without any audio hardware).
+        // Deterministic tests for the engine (runs without any audio hardware).
         .executableTarget(
-            name: "RouterCoreSelfTest",
-            dependencies: ["RouterCore"]
+            name: "SplitCoreSelfTest",
+            dependencies: ["SplitCore"]
         ),
     ]
 )

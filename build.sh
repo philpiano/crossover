@@ -1,7 +1,7 @@
 #!/bin/bash
-# Builds Audio Angel.app with only the Command Line Tools (no Xcode needed).
+# Builds Audio Split Angel.app with only the Command Line Tools (no Xcode needed).
 #
-#   ./build.sh          test the engine, then build build/Audio Angel.app
+#   ./build.sh          test the engine, then build build/Audio Split Angel.app
 #   ./build.sh test     engine self-test only
 #
 # This script is the tested way to build. Package.swift is there for opening
@@ -13,34 +13,34 @@ ARCH="$(uname -m)"
 TARGET="$ARCH-apple-macos13.0"
 OUT="build"
 OBJ="$OUT/obj"
-APP="$OUT/Audio Angel.app"
+APP="$OUT/Audio Split Angel.app"
 mkdir -p "$OBJ"
 
 echo "› Compiling the real-time engine (C)"
 clang -std=c11 -O2 -Wall -Wextra -Werror -target "$TARGET" \
-    -I Sources/RouterCore/include \
-    -c Sources/RouterCore/router_core.c -o "$OBJ/router_core.o"
+    -I Sources/SplitCore/include \
+    -c Sources/SplitCore/split_core.c -o "$OBJ/split_core.o"
 
 echo "› Engine self-test"
 clang -std=c11 -O2 -Wall -target "$TARGET" \
-    -I Sources/RouterCore/include \
-    Sources/RouterCoreSelfTest/main.c "$OBJ/router_core.o" \
-    -framework CoreAudio -o "$OBJ/RouterCoreSelfTest"
-"$OBJ/RouterCoreSelfTest"
+    -I Sources/SplitCore/include \
+    Sources/SplitCoreSelfTest/main.c "$OBJ/split_core.o" \
+    -framework CoreAudio -o "$OBJ/SplitCoreSelfTest"
+"$OBJ/SplitCoreSelfTest"
 
 [ "${1:-}" = "test" ] && exit 0
 
 echo "› Compiling the app (Swift)"
 swiftc -O -parse-as-library -target "$TARGET" \
-    -I Sources/RouterCore/include \
-    Sources/AudioAngel/*.swift "$OBJ/router_core.o" \
-    -framework CoreAudio -framework AVFoundation -framework AppKit -framework SwiftUI \
-    -o "$OBJ/AudioAngel"
+    -I Sources/SplitCore/include \
+    Sources/AudioSplitAngel/*.swift "$OBJ/split_core.o" \
+    -framework CoreAudio -framework AVFoundation -framework AppKit -framework SwiftUI -framework Accelerate \
+    -o "$OBJ/AudioSplitAngel"
 
 echo "› Packaging $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$OBJ/AudioAngel" "$APP/Contents/MacOS/AudioAngel"
+cp "$OBJ/AudioSplitAngel" "$APP/Contents/MacOS/AudioSplitAngel"
 cp Resources/Logo.png "$APP/Contents/Resources/Logo.png"
 
 # The app icon, generated from the logo at every size macOS asks for.
@@ -56,20 +56,20 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key><string>Audio Angel</string>
-    <key>CFBundleDisplayName</key><string>Audio Angel</string>
-    <key>CFBundleIdentifier</key><string>com.philipwarda.audioangel</string>
-    <key>CFBundleExecutable</key><string>AudioAngel</string>
+    <key>CFBundleName</key><string>Audio Split Angel</string>
+    <key>CFBundleDisplayName</key><string>Audio Split Angel</string>
+    <key>CFBundleIdentifier</key><string>com.philipwarda.audiosplitangel</string>
+    <key>CFBundleExecutable</key><string>AudioSplitAngel</string>
     <key>CFBundleIconFile</key><string>AppIcon</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>1.1</string>
-    <key>CFBundleVersion</key><string>8</string>
+    <key>CFBundleShortVersionString</key><string>0.1</string>
+    <key>CFBundleVersion</key><string>1</string>
     <key>NSHumanReadableCopyright</key><string>Created by Philip Warda with the instrumental help of Claude Opus 5.0</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSApplicationCategoryType</key><string>public.app-category.music</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Audio Angel routes your microphone, piano and other audio inputs to Zoom and your headphones.</string>
+    <string>Audio Split Angel splits the audio input you choose (a loopback such as BlackHole, or an interface) across your speakers.</string>
 </dict>
 </plist>
 PLIST

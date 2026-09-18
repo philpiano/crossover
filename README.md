@@ -1,301 +1,111 @@
-<img width="100" height="100" alt="Logo" src="https://github.com/user-attachments/assets/c46f847e-2a5d-4c9e-955e-f3a88d50e523" />
+<img width="100" height="100" alt="Logo" src="Resources/Logo.png" />
 
-# Audio Angel v1.1
+# Audio Split Angel v0.1
 
-![Audio Angel's main window: four input strips (Vocal Mic, Yamaha Piano, Mac / iPad, Zoom), each with five effects, and two output strips (Teacher, Student)](docs/screenshot.png)
+![Audio Split Angel's main window: the crossover display with the live spectrum, the five edge controls, and the four band outputs](docs/screenshot.png)
 
-<sub>The main window on the author's lesson rig: a Focusrite interface, a Yamaha digital
-piano, browser/iPad sound and the Zoom call, sent to the teacher's headphones and to
-the student. Rendered by the app itself (`--snapshot --demo`) with every device
-switched on.</sub>
+<sub>Rendered by the app itself (`--snapshot FILE --demo`): BlackHole 64ch in, the four
+bands out to pairs of a Focusrite Sapphire, the Low band mono to channel 1.</sub>
 
-A small Mac app that routes audio for lessons over Zoom. It gathers your **mic**
-(USB interface), your **piano** (Yamaha USB), **browser music** and **the Zoom
-call** into input strips, and sends each of them wherever you choose: **to Zoom**,
-to your **headphones**, or anything else.
+A small Mac app that takes **one audio input** and splits it by frequency into
+**four bands**, each sent to its own **output**, so every set of speakers gets only
+what it's good at: the bass to the big speakers, no bass to the small ones.
 
-```
-   INPUT ↓                                         ┃ OUTPUT ↑
-   Mic      Piano     Mac/iPad   Zoom              ┃ Teacher    Student
-   source   source    source     source            ┃ ← sends    ← sends
-   effects  effects   effects    effects           ┃
-   fader    fader     fader      fader             ┃ fader      fader
-   sends:   sends:    sends:     sends:            ┃ device:    device:
-   Teacher  Teacher   Teacher    Teacher           ┃ headphones BlackHole 2ch → Zoom
-   Student  Student   Student    —                 ┃
-```
+| Band     | Default range     | Typical speaker          |
+|----------|-------------------|--------------------------|
+| Low      | 20 Hz – 100 Hz    | subwoofers               |
+| Mid      | 100 Hz – 1 kHz    | mid-bass / full-range    |
+| Mid-High | 1 kHz – 5 kHz     | mid drivers              |
+| High     | 5 kHz – 20 kHz    | tweeters / small speakers|
 
-Created by Philip Warda with the instrumental help of Claude Opus 5.0.
+Created by Philip Warda with the instrumental help of Claude Opus 5.0. Built from the
+engine of [Audio Angel](https://github.com/philpiano/audio-angel).
 
-**Why it exists.** Teaching piano over Zoom means juggling a mic, a digital piano,
-backing tracks in the browser and the call itself, and macOS has no way to mix them
-and hand the result to Zoom. Audio Angel is that missing mixing desk: low latency,
-built to stay up for a whole lesson, and simple enough to set once and forget.
+**Requirements:** macOS 13 Ventura or later, and Apple's Command Line Tools to build it
+(`xcode-select --install`; no Xcode needed). To split what the Mac itself plays, a
+loopback such as [BlackHole](https://github.com/ExistentialAudio/BlackHole).
 
-**Requirements:** macOS 13 Ventura or later, the free
-[BlackHole](https://github.com/ExistentialAudio/BlackHole) loopback driver, and
-Apple's Command Line Tools to build it (no Xcode needed).
-
----
-
-## First time
-
-**1. Install the loopback devices.** macOS can't hand one app's sound to another by
-itself, so we use BlackHole (free, open source): three virtual "cables".
+## Build
 
 ```bash
-brew install blackhole-2ch blackhole-16ch blackhole-64ch
-```
-
-Then log out and back in (or restart) so macOS picks them up. The number in each
-name is its channel count; Audio Angel only uses channels 1+2 of each, so to us
-they are just three separate cables.
-
-**2. Get the code and build the app.** Only Apple's Command Line Tools are needed,
-not Xcode (`xcode-select --install` if you don't have them).
-
-```bash
-git clone https://github.com/philpiano/audio-angel.git
-cd audio-angel
 ./build.sh
 ```
 
-That runs the audio engine's tests, then makes `build/Audio Angel.app`. Drag it to
-Applications if you like.
-
-**3. Open it** and allow microphone access when macOS asks. Without that, every
-input is silent. macOS treats all audio inputs as "microphone", the loopbacks too.
-The builds are signed ad hoc, so macOS may ask again after a rebuild.
-
----
-
-## The three cables
-
-| Device          | Who writes into it                 | Who listens              | Strip in Audio Angel  |
-|-----------------|------------------------------------|--------------------------|-----------------------|
-| BlackHole 2ch   | Audio Angel                        | Zoom (as its microphone) | output **Student**    |
-| BlackHole 16ch  | Zoom (as its speaker)              | Audio Angel              | input **Zoom**        |
-| BlackHole 64ch  | The Mac (set as the system output) | Audio Angel              | input **Mac / Browser** |
-
-**In Zoom › Settings › Audio**
-- Microphone: **BlackHole 2ch**
-- Speaker: **BlackHole 16ch**
-- Turn on **Original sound for musicians** in the settings, and in the meeting.
-  Otherwise Zoom's noise suppression chews up the piano.
-- Untick **Automatically adjust microphone volume**.
-
-**The Mac's output** goes to **BlackHole 64ch** (Settings › "Send Mac sound to…").
-From then on, anything the Mac plays (Chrome, YouTube, Spotify) arrives in the
-**Mac / Browser** input.
-
-**iPad sound** reaches the Mac only through the app that captures the iPad (OBS).
-In OBS set **Settings › Audio › Advanced › Monitoring Device** to **BlackHole
-64ch** and the iPad source's monitoring to **Monitor and Output**; it then arrives
-in the same **Mac / Browser** input.
-
-Never send the **Zoom** input to the output that feeds Zoom: your student would
-hear themselves.
-
----
+That runs the engine's tests, then makes `build/Audio Split Angel.app`. Open it and
+allow microphone access when macOS asks (macOS treats every audio input as a
+microphone, loopbacks too).
 
 ## Using it
 
-Every strip reads top to bottom, the way sound flows.
+- **Input** (top): the device and channels to split. To split the Mac's own sound, set
+  the Mac's output to BlackHole 64ch and choose BlackHole 64ch here.
+- **The display** (centre): the input's live spectrum, coloured by the band each part
+  of it goes to, with each band's response drawn over it. Drag a crossover line left
+  or right to move it. Drag a band's dot up or down to set its level; double-click it
+  for 0 dB.
+- **Edges** (under the display): every crossover's frequency (type `120`, `1.2k`…)
+  and slope, plus a low cut on the Low band and a high cut on the High band (each can
+  be Off). **Reset to defaults** puts the crossovers and levels back; devices stay.
+- **Bands** (bottom): level, **M** mute, **S** solo, meter, and the **output**: any
+  device, any stereo pair or mono channel. Several bands can share one interface
+  (1+2, 3+4, 5+6, 7+8) or each go to a different device. A band pointed back into the
+  loopback channels the input reads from is silenced and its dot turns red.
+- **⚙**: sample rate, buffer size (64 frames by default), and which device keeps the
+  clock. Closing the window doesn't stop the audio; quit from the menu bar icon.
 
-**Input strips**
-- **Source:** the device and its channels (mono, or a stereo pair).
-- **Effects**, in signal order. Each has an on/off button and an amount knob
-  beside it. 100% is the effect as designed and sits where a send's 0 dB does;
-  drag up or down (0–150%), double-click for 100%, right-click for 120 / 100 / 80%.
-  - **Low-cut** (on by default): removes rumble below 80 Hz (12 dB/octave), the
-    standard mixing-desk low-cut. It slightly softens the piano's lowest octave;
-    turn it off on the Piano strip if you miss that weight. The amount moves the
-    cutoff (120% is 96 Hz).
-  - **Noise gate** (on by default): silences a steady background noise (a fan,
-    hiss, hum) while speech, piano and every sudden sound pass straight through at
-    full level. It learns the room's noise by itself from any pause of a few
-    seconds, and playing never fools it into cutting soft passages. The amount sets
-    how strict it is: above 100% for a noisier room, below to let more through.
-  - **Auto level** (on by default): so you don't have to ride the volume. When
-    the student drops well below their normal level it brings them back up, and
-    when they jump back up it catches the jump before it reaches you. Its light
-    turns yellow while it's lifting a quiet passage and red while it's capping a
-    jump. It learns
-    their normal level while they play and holds it through pauses, so silence
-    never pumps up the hiss. The amount sets how strongly it acts; at 0% it does
-    nothing.
-  - **Compress** (on by default): a gentle leveller (2:1 above −24 dBFS, soft knee,
-    +2 dB make-up). Normal speech is left about where it was, shouts come down,
-    whispers come up 2 dB. Its light turns yellow while it's working. The amount
-    sets how strongly it acts.
-  - **Limiter** (on by default): a safety net at −1 dBFS. Silent until a peak would
-    overload; its light turns orange while it's catching one. Above 100% the
-    ceiling drops (150% is −6 dBFS); below, some of a peak gets through.
-- **Fader** with its meter, then two boxes: the **level** in dB and the **peak**.
-  Click the level to type an exact value (`-6`, `+3.5`, `-inf`); right-click for
-  +5 / 0 / −5 dB. The peak box holds the loudest moment since you last clicked it,
-  and turns red if that moment reached full scale, so a clip is still showing when
-  you come back to the window. **M** mutes.
-- **Send:** one button per output. Click to send this input there; the knob beside
-  it sets how much (drag up or down, double-click for 0 dB). A send that would feed
-  a loopback back into itself is blocked and shows ⚠.
+### Slopes
 
-**Output strips**
-- **Source:** the name inputs send to. It's the first word of the output's name
-  ("Teacher Headphones" → **Teacher**); double-click to rename it. Green when
-  something is being sent here; hover to see what.
-- **Limiter** (on by default): a final −1 dBFS safety net on everything sent here,
-  for when a few boosted inputs add up.
-- **Fader**, **level**, **peak**, **M**, then **Output:** the device it plays on.
-
-**Everywhere**
-- The dot next to a strip's name: green = connected, orange = device unplugged (it
-  reconnects on its own), red = that device doesn't have those channels.
-- **⋯** on a strip moves it left or right, or removes it.
-- The window is always exactly the size of the desk, status bar included when it's
-  shown, and follows it when you switch modes or add a strip. Squeeze it as small
-  as you like and the desk scrolls. Closing it **doesn't stop the audio**;
-  the waveform icon in the menu bar reopens it or quits.
-- **View › Compact Mode** switches to a tight layout for teaching with other windows
-  open: narrower strips, smaller controls, and M sharing a row with the level and
-  peak. **View › Status Bar** hides the bar along the top; dropouts and clips are
-  still counted and show again when it's back. Both are remembered, and Settings
-  stays on ⌘, either way.
-- Everything is saved automatically.
-
-**The status bar**
-- **≈ ms:** the delay through Audio Angel. Zoom adds its own on top.
-- **⚠** next to the status: something needs attention, usually a device that isn't
-  connected. Click it to read what.
-- **ⓘ**: good to know, nothing to do. For example, the Yamaha's USB audio only runs
-  at 44.1 kHz, so macOS converts it to 48 kHz on the way in.
-- **Dropouts:** times the Mac couldn't prepare audio in time and a tiny click got
-  through. An odd one is harmless; if it climbs while you play, raise the buffer
-  size. The first two seconds after a start aren't counted.
-- **Clipped:** times an output went over full scale and the final safety stage
-  caught it — usually two loud sources adding up. Turn that output down a little.
-- Click a counter to clear it; **↻** restarts the engine and clears both.
-- **⚙ Settings** (⌘,): sample rate (**keep 48 kHz**, what Zoom uses), buffer size
-  (**128** is a good start), the clock device, and the setup checklist. An orange
-  dot on the gear means something in the checklist needs attention.
-
----
+All crossovers are Linkwitz-Riley (except 6 dB, first order), the standard for
+speakers: at the crossover each side is −6 dB and they add back up to exactly the
+input. **24 dB/oct** is the default. 6 overlaps the most, 48 is the steepest. At
+12 and 36 the upper band is polarity-inverted, as Linkwitz-Riley requires at those
+orders, so the speakers still add up evenly in the room.
 
 ## How it works
 
-**One clock, one callback.** Audio Angel builds a hidden, private *aggregate device*
-out of every device you've assigned. Core Audio keeps them all in step (your USB
-interface is the master clock; the others are drift-corrected against it). Then
-one audio callback sees every input and every output at the same moment. Routing
-is a plain matrix mix: no buffers between devices, no extra delay added.
+**One clock, one callback.** Audio Split Angel builds a hidden, private *aggregate
+device* from the input device and every output device. Core Audio keeps them in step
+(an interface is the master clock; the others are drift-corrected), so one callback
+reads the input and writes all four outputs. Nothing is buffered in between.
 
-**The audio thread is plain C** (`Sources/RouterCore`). It never allocates memory,
-takes a lock, or calls into Swift. Each input runs low-cut → noise gate → auto
-level → compress (with the fader) → limiter, and each output a limiter; none of it
-adds latency, and every effect is crossfaded when switched so nothing clicks. The UI changes levels through lock-free atomics, smoothed over
-~10 ms. A soft safety stage on every output means nothing leaves the app above full
-scale.
+**The engine is plain C** (`Sources/SplitCore`): a Linkwitz-Riley crossover tree
+with all-pass phase compensation, so the four bands sum flat, electrically and
+between speakers in the room. It adds **no latency**. The filters are recursive and run
+sample by sample inside the callback, so the delay is only the device buffers: at
+64 frames and 48 kHz, 1.3 ms per buffer plus what the devices themselves add. The audio
+thread never allocates, locks or calls into Swift. Crossover moves glide (~30 ms), a
+slope change dips the outputs for ~10 ms while the filters swap, and gains are
+smoothed, so nothing clicks. A soft safety stage keeps every output below full scale.
 
-**The rest is Swift / SwiftUI** (`Sources/AudioAngel`):
+**Built to stay up** (from Audio Angel): plug and unplug freely, it rebuilds by
+itself; channel changes re-point in milliseconds; it rebuilds after sleep; a watchdog
+restarts a stalled engine; failed builds retry with backoff; App Nap is disabled.
 
-| File                    | What it does |
-|-------------------------|--------------|
-| `EngineController.swift`| Builds the aggregate device, maps strips to channels, and heals itself (below). |
-| `RouterModel.swift`     | App state, saving, meters at 30 fps. |
-| `Mixer.swift`           | The strips: sources, effects, faders, sends, outputs. |
-| `Views.swift`           | The window, status bar, and Settings. |
-| `RouterConfig.swift`    | Strips and sends as saved, and the first-launch layout guessed from device names. |
-| `CoreAudioUtils.swift`  | Typed wrappers for the Core Audio property API. |
-| `Diagnostics.swift`     | Command-line checks (below). |
-
-### Built to stay up
-
-- **Plug and unplug freely.** The app listens for device changes. When a device it
-  needs appears, disappears or changes, it rebuilds the engine automatically. The
-  other devices keep their settings, and a missing device just goes quiet until it
-  returns.
-- **Changing channels doesn't rebuild.** The engine re-points the strips in a few
-  milliseconds.
-- **Sleep/wake:** it rebuilds after waking, once USB devices are back.
-- **Watchdog:** if the audio callback stops for 3 seconds, the engine restarts.
-- **If a build fails**, it retries with backoff (2, 4, 8, 15 s…) and says why.
-- **If another app changes the sample rate** of a device in use, it puts it back.
-- **App Nap is disabled** while it runs, so macOS never throttles the audio.
-- The engine's aggregate device is *private*. It disappears when the app quits,
-  even if it crashes, so it never clutters your Sound settings.
-
----
-
-## Diagnostic log
-
-Turn on **Settings › Diagnostics › Write a diagnostic log** (it's off by default)
-and, if the sound ever stops, Audio Angel will have recorded why. Each launch then
-writes one log file, **`logs/audio-angel-<date>_<time>.jsonl`** in this project
-folder (or `~/Library/Logs/Audio Angel/` if the app lives somewhere else).
-**Show log folder** opens it. The newest 60 sessions are kept; the folder is
-ignored by git.
-
-It's [JSON Lines](https://jsonlines.org): one event per line, readable in any text
-editor and easy to analyse. Every line has `t` (time, to the millisecond), `s`
-(seconds since launch) and `ev` (what happened). The events that explain a gap:
-
-| Event | What it records |
+| File | What it does |
 |---|---|
-| `rebuild_scheduled` | The engine decided to restart, and **the exact trigger** (a device vanished, a sample rate changed, the watchdog, a setting, the ↻ button…) |
-| `sample_rate_changed`, `device_alive_changed`, `devices_changed` | Each notification the engine acted on or ignored, with the values it saw and its decision |
-| `hal_property` | Every raw change Core Audio reported on the devices in use, whether or not it caused anything |
-| `audio_stopped` / `audio_resumed` | When sound stopped, why, and **how long it was silent**, measured on the audio thread's own clock |
-| `set_device_rate`, `aggregate_created`, `aggregate_ready`, `engine_started`, `rebuild_failed` | Each step of a restart and how long it took |
-| `heartbeat` (every 2 s) | Callbacks on time, the longest gap between them, each strip's peak level and any stretch of exact digital silence, clips, dropouts |
-| `overload`, `watchdog_no_callbacks` | Missed audio deadlines and stalls |
-| `config`, `devices`, `session_start` | Your settings, every device with its rates and latencies, the Mac, other running apps, sleep/wake |
-
-The log holds device names and timings, never audio. Nothing is written from the
-audio thread, so recording can't cause a dropout.
-
----
+| `SplitCore/split_core.c` | The crossover, routing, meters and spectrum feed |
+| `EngineController.swift` | Builds the aggregate device, maps input/bands to channels, heals itself |
+| `SplitModel.swift` | App state, saving, meters, and the spectrum analyser (FFT) |
+| `CrossoverGraph.swift` | The display: spectrum, band curves, dragging |
+| `BandPanel.swift` | The edge controls and the four band cards |
+| `Views.swift` | The window, input picker, status and settings |
+| `SplitConfig.swift` | What's saved, and the first-launch guess |
 
 ## Checks
 
 ```bash
-./build.sh test                                               # engine tests only (no hardware)
-"build/Audio Angel.app/Contents/MacOS/AudioAngel" --list-devices
-"build/Audio Angel.app/Contents/MacOS/AudioAngel" --probe      # silent run on the speakers
-"build/Audio Angel.app/Contents/MacOS/AudioAngel" --probe --log DIR  # and check the log explains a forced restart
-"build/Audio Angel.app/Contents/MacOS/AudioAngel" --snapshot out.png           # the window, as a picture
-"build/Audio Angel.app/Contents/MacOS/AudioAngel" --snapshot-settings out.png  # the Settings window
+./build.sh test                                                          # engine tests, no hardware
+"build/Audio Split Angel.app/Contents/MacOS/AudioSplitAngel" --list-devices
+"build/Audio Split Angel.app/Contents/MacOS/AudioSplitAngel" --probe     # silent run on the speakers
+"build/Audio Split Angel.app/Contents/MacOS/AudioSplitAngel" --snapshot out.png --demo
 ```
 
-The engine tests cover routing, mixing, gain, mute, meters, peak hold, garbage
-input, bad channel maps, and each effect against its specification (the low-cut's
-−3 dB point, the compressor's curve, the limiters' ceilings, switching without
-clicks). The noise gate and auto level are tested on realistic sound rather than
-test tones: room noise, piano-like notes, speech-like bursts, pedalled legato, a fan
-switching on, pauses, and a student dropping to 10% and jumping back.
-
-`--probe` builds a real engine on the built-in speakers (output only: silent, and no
-microphone prompt). It checks that callbacks arrive at the right rate, rebuilds at a
-new buffer size, confirms the engine stays still when nothing changes, and confirms
-nothing is left behind. With `--log DIR` it also records a diagnostic log, changes
-the speakers' sample rate behind the engine's back (and restores it), and checks
-that the log attributes the resulting restart to the rate change and measures the
-silence.
-
-## Limits and next steps
-
-- macOS 13 or later, up to 8 inputs and 8 outputs, mono or stereo.
-- BlackHole's device names are fixed (2ch / 16ch / 64ch). A later version could
-  ship its own virtual devices named "Audio Angel → Zoom" and so on. That's a
-  Core Audio driver (AudioServerPlugIn), deliberately not in this version.
-- A dedicated iPad input would mean capturing the iPad directly; it may compete
-  with OBS for the device, so it needs testing outside a lesson first.
-
-Hey, Philip here. I'm just writing a few words so Github registers me as an actual Author :p 
+The engine tests check that the four bands sum back to the input (within 0.05 dB) at
+every slope, that the display's curves match what the engine really does, the textbook
+crossover numbers (−6 dB points, 24/48 dB per octave), separation (50 Hz stays out of
+the upper bands), stereo/mono routing, gain and mute, that slope and frequency changes
+don't click, garbage input, bad channel maps, meters and the spectrum feed.
 
 ## Licence
 
-MIT: use it, change it, share it, including commercially. Just keep the copyright
-notice. See [LICENSE](LICENSE).
-
-BlackHole, which Audio Angel relies on but does not include, is a separate project
-with its own licence (GPL-3.0).
+MIT. See [LICENSE](LICENSE).
