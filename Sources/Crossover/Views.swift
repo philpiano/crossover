@@ -3,7 +3,7 @@ import AVFoundation
 import SwiftUI
 
 /// Light, dark, or whatever the Mac is set to. Chosen in Settings (the gear).
-enum Appearance: String, CaseIterable {
+enum Appearance: String {
     case light, dark, system
 
     static let key = "Crossover.Appearance"

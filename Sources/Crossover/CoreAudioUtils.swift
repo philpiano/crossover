@@ -116,15 +116,6 @@ enum CA {
         let ranges = getArray(device, addr(kAudioDevicePropertyAvailableNominalSampleRates), AudioValueRange())
         return ranges.isEmpty || ranges.contains { rate >= $0.mMinimum - 0.5 && rate <= $0.mMaximum + 0.5 }
     }
-
-    static func defaultOutputDevice() -> AudioObjectID? {
-        get(system, addr(kAudioHardwarePropertyDefaultOutputDevice), AudioObjectID(0)).flatMap { $0 == 0 ? nil : $0 }
-    }
-
-    @discardableResult
-    static func setDefaultOutputDevice(_ device: AudioObjectID) -> Bool {
-        set(system, addr(kAudioHardwarePropertyDefaultOutputDevice), device) == noErr
-    }
 }
 
 /// A snapshot of one audio device, as the app needs to see it.

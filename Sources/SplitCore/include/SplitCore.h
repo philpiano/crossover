@@ -31,6 +31,7 @@
 //   24  Linkwitz-Riley 4th order (the standard)
 //   36  Linkwitz-Riley 6th order; upper side phase-inverted, like LR2
 //   48  Linkwitz-Riley 8th order
+//   96  Linkwitz-Riley 16th order, near brick-wall
 // An outer edge also accepts 0 (off). Every Linkwitz-Riley crossover is -6 dB on
 // each side at its frequency; a first-order one is -3 dB.
 //
@@ -75,7 +76,7 @@ typedef struct sc_engine sc_engine;
 // One edge as the filters see it.
 typedef struct {
     float hz;
-    int32_t slope; // 0 (outer edges only), 6, 12, 24, 36 or 48
+    int32_t slope; // 0 (outer edges only), 6, 12, 24, 36, 48 or 96
 } sc_edge;
 
 sc_engine *sc_engine_create(void);

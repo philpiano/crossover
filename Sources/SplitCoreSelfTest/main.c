@@ -90,7 +90,7 @@ static const sc_edge defaults[SC_EDGES] = { { 20, 24 }, { 100, 24 }, { 1000, 24 
 // sum flat in the room.
 static void test_bands_sum_flat(void) {
     printf("Bands sum flat (outer edges off)\n");
-    const int slopes[] = { 6, 12, 24, 36, 48 };
+    const int slopes[] = { 6, 12, 24, 36, 48, 96 };
     const double freqs[] = { 25, 60, 100, 180, 400, 1000, 2200, 5000, 9000, 16000 };
     for (size_t si = 0; si < sizeof slopes / sizeof *slopes; si++) {
         sc_engine *e = make(1);
@@ -115,7 +115,7 @@ static void test_bands_sum_flat(void) {
 // display draws. Checked for every band, several slopes, with the outer edges on.
 static void test_response_matches_engine(void) {
     printf("Display response matches the engine\n");
-    const int slopes[] = { 6, 12, 48 };
+    const int slopes[] = { 6, 12, 48, 96 };
     const double freqs[] = { 15, 40, 100, 300, 1000, 3000, 5000, 12000, 21000 };
     for (size_t si = 0; si < sizeof slopes / sizeof *slopes; si++) {
         sc_engine *e = make(1);
@@ -145,8 +145,8 @@ static void test_crossover_shapes(void) {
     sc_edge ed[SC_EDGES];
     memcpy(ed, defaults, sizeof ed);
     ed[0].slope = 0; ed[4].slope = 0;
-    const int slopes[] = { 12, 24, 36, 48 };
-    for (size_t i = 0; i < 4; i++) {
+    const int slopes[] = { 12, 24, 36, 48, 96 };
+    for (size_t i = 0; i < 5; i++) {
         ed[2].slope = slopes[i];
         const double lo = sc_band_response_db(ed, SC_ALL_BANDS, FS, 1, 1000), hi = sc_band_response_db(ed, SC_ALL_BANDS, FS, 2, 1000);
         CHECK(fabs(lo + 6.02) < 0.1 && fabs(hi + 6.02) < 0.1, "LR%d at the crossover: %.2f / %.2f dB", slopes[i] / 6, lo, hi);
@@ -159,6 +159,11 @@ static void test_crossover_shapes(void) {
     ed[1].slope = 48;
     v = sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 200);
     CHECK(fabs(v + 48.2) < 0.4, "LR8 one octave above 100 Hz: %.2f dB", v);
+    ed[1].slope = 96;
+    v = sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 200);
+    CHECK(fabs(v + 96.3) < 0.6, "LR16 one octave above 100 Hz: %.2f dB", v);
+    CHECK(fabs(sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 50)) < 0.01, "LR16 is flat an octave below: %.3f dB",
+          sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 50));
     // In the middle of its range each default band is within 1 dB of flat. (Not
     // exactly flat: 20-100 Hz is only 2.3 octaves, so the two 24 dB skirts overlap.)
     memcpy(ed, defaults, sizeof ed);
@@ -297,7 +302,7 @@ static float max_step_during(sc_engine *e, rig *r, double hz, int callbacks_befo
     return worst;
 }
 
-static void change_slope(sc_engine *e) { sc_engine_set_edge(e, SC_EDGE_X1, 100, 48); }
+static void change_slope(sc_engine *e) { sc_engine_set_edge(e, SC_EDGE_X1, 100, 96); }
 static void jump_frequency(sc_engine *e) { sc_engine_set_edge(e, SC_EDGE_X1, 1500, 24); sc_engine_set_edge(e, SC_EDGE_X2, 3000, 24); }
 static void nothing(sc_engine *e) { (void)e; }
 static void flip_low(sc_engine *e) { sc_engine_set_band_invert(e, 0, true); }

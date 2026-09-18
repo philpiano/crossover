@@ -21,4 +21,5 @@ real-time engine in plain C. Read `README.md` first.
   display draws `sc_band_response_db`, which is checked against the running engine.
 - **`build/Crossover.app/Contents/MacOS/Crossover --check-model`** checks undo/redo,
   presets and band deletion; run it after touching `SplitModel` or `SplitConfig`.
+- **The icon** is drawn by `tools/make_icon.swift`; rerun it rather than editing `Resources/Logo.png`.
 - **Bump `CFBundleVersion` in `build.sh`** for every build handed to Philip.

@@ -122,7 +122,7 @@ struct EdgeControl: View {
                 ? "Low cut on the input: keeps sub-sonic rumble out of the bass speakers. Slope in dB per octave, or Off."
                 : "High cut on the input. Slope in dB per octave, or Off."
         }
-        return "How sharply the two bands separate, in dB per octave. 24 is the standard (Linkwitz-Riley). 6 overlaps the most, 48 is the steepest. At 12 and 36 the upper band is polarity-inverted, as Linkwitz-Riley needs, so the speakers still add up evenly."
+        return "How sharply the two bands separate, in dB per octave. 24 is the standard (Linkwitz-Riley). 6 overlaps the most; 96 is the steepest, close to a brick wall. At 12 and 36 the upper band is polarity-inverted, as Linkwitz-Riley needs, so the speakers still add up evenly."
     }
 }
 

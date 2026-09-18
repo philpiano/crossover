@@ -21,8 +21,8 @@
 #define SC_INPUT_SANITY 64.0f
 // The output safety clipper is transparent below this level and soft above it.
 #define SC_CLIP_KNEE 0.95f
-// Biquad sections per filter: an 8th-order Linkwitz-Riley is 4 of them.
-#define SC_MAX_SECTIONS 4
+// Biquad sections per filter: a 16th-order Linkwitz-Riley is 8 of them.
+#define SC_MAX_SECTIONS 8
 
 #define RLX memory_order_relaxed
 
@@ -112,7 +112,7 @@ static inline bool is_outer(int k) { return k == SC_EDGE_LOW || k == SC_EDGE_HIG
 
 static inline bool valid_slope(int edge, int slope) {
     switch (slope) {
-        case 6: case 12: case 24: case 36: case 48: return true;
+        case 6: case 12: case 24: case 36: case 48: case 96: return true;
         case 0: return is_outer(edge);
         default: return false;
     }
@@ -133,15 +133,16 @@ static double clamp_hz(double hz, double fs) {
 // a Linkwitz-Riley pair sum to an all-pass holds exactly in the digital domain too.
 
 // The sections of an n-th order Butterworth: a first-order one if n is odd, then
-// second-order ones with these Qs.
-static int butterworth(int n, bool *first, double q[2]) {
-    switch (n) {
-        case 1: *first = true;  return 0;
-        case 2: *first = false; q[0] = M_SQRT1_2; return 1;
-        case 3: *first = true;  q[0] = 1.0; return 1;
-        case 4: *first = false; q[0] = 0.54119610014619698; q[1] = 1.3065629648763766; return 2;
-        default: *first = false; return 0;
+// n/2 second-order ones. Pole pair k sits at angle (2k+1)pi/2n from the real
+// axis, so its Q is 1 / (2 cos angle).
+static int butterworth(int n, bool *first, double q[4]) {
+    *first = (n % 2) == 1;
+    const int pairs = n / 2;
+    for (int k = 0; k < pairs; k++) {
+        const double angle = *first ? (double)(k + 1) * M_PI / n : (2.0 * k + 1.0) * M_PI / (2.0 * n);
+        q[k] = 1.0 / (2.0 * cos(angle));
     }
+    return pairs;
 }
 
 static sc_biquad first_order(int kind, double k) {
@@ -175,9 +176,9 @@ static void design(sc_chain *c, int kind, double hz, int slope, double fs, bool 
         if (kind != KIND_AP) c->s[c->n++] = first_order(kind, k);
         return;
     }
-    const int order = slope / 12; // Linkwitz-Riley 2n = Butterworth n, squared
+    const int order = slope / 12; // Linkwitz-Riley 2n = Butterworth n, squared: 1, 2, 3, 4 or 8
     bool first;
-    double q[2];
+    double q[4];
     const int nq = butterworth(order, &first, q);
     // LP and HP run the Butterworth twice; the matching all-pass runs it once.
     const int passes = kind == KIND_AP ? 1 : 2;

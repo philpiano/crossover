@@ -11,7 +11,6 @@ struct EngineStatus: Equatable {
     var bufferFrames = 0
     var inputLatencyMs: Double = 0
     var outputLatencyMs: Double = 0
-    var clockDeviceName = ""
     var devicesInUse: [String] = []
     /// Needs the user: a device missing, one that couldn't be set up.
     var warnings: [String] = []
@@ -112,22 +111,12 @@ final class EngineController {
     /// When audio last (re)started; overloads just after it aren't counted.
     private var runningSince = Date.distantPast
 
-    private let statusLock = NSLock()
-    private var statusSnapshot = EngineStatus()
-
     private var status = EngineStatus() {
         didSet {
             guard status != oldValue else { return }
             let snapshot = status
-            statusLock.lock(); statusSnapshot = snapshot; statusLock.unlock()
             DispatchQueue.main.async { self.onStatus?(snapshot) }
         }
-    }
-
-    /// The latest status, readable from any thread.
-    var currentStatus: EngineStatus {
-        statusLock.lock(); defer { statusLock.unlock() }
-        return statusSnapshot
     }
 
     init() {
@@ -377,7 +366,6 @@ final class EngineController {
             bufferFrames: actualFrames,
             inputLatencyMs: latencyMs(agg, kAudioObjectPropertyScopeInput, frames: actualFrames, rate: actualRate),
             outputLatencyMs: latencyMs(agg, kAudioObjectPropertyScopeOutput, frames: actualFrames, rate: actualRate),
-            clockDeviceName: byUID[clock]?.name ?? "",
             devicesInUse: actualOrder.compactMap { byUID[$0]?.name },
             warnings: warnings,
             notes: notes

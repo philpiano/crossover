@@ -15,7 +15,7 @@ struct Endpoint: Codable, Equatable {
 /// One edge of the split: a crossover between two bands, or an outer cut.
 struct EdgeConfig: Codable, Equatable {
     var hz: Double
-    /// dB per octave: 6, 12, 24, 36 or 48. Outer edges may also be 0 (off).
+    /// dB per octave: 6, 12, 24, 36, 48 or 96. Outer edges may also be 0 (off).
     var slope: Int
 }
 
@@ -64,8 +64,8 @@ struct SplitConfig: Codable, Equatable {
     static let edgeCount = Int(SC_EDGES)
 
     static let bandNames = ["Low", "Mid", "Mid-High", "High"]
-    static let crossoverSlopes = [6, 12, 24, 36, 48]
-    static let outerSlopes = [0, 6, 12, 24, 36, 48]
+    static let crossoverSlopes = [6, 12, 24, 36, 48, 96]
+    static let outerSlopes = [0, 6, 12, 24, 36, 48, 96]
     static let defaultEdges = [
         EdgeConfig(hz: 20, slope: 24),
         EdgeConfig(hz: 100, slope: 24),
