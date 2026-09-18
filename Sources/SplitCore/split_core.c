@@ -31,7 +31,8 @@ typedef struct { int32_t n; sc_ref c[SC_MAX_SLOT_CHANNELS]; } sc_map;
 
 // One second-order section, transposed direct form II, normalised so a0 = 1.
 typedef struct { double b0, b1, b2, a1, a2; } sc_biquad;
-// A cascade of sections, then a sign (-1 for the phase-inverted side of an LR2/LR6).
+// A cascade of sections, then a sign: -1 for the phase-inverted side of an
+// LR2/LR6, 0 for the silent side of a crossover whose band was removed.
 typedef struct { int32_t n; double sign; sc_biquad s[SC_MAX_SECTIONS]; } sc_chain;
 typedef struct { double z1[SC_MAX_SECTIONS], z2[SC_MAX_SECTIONS]; } sc_state;
 
@@ -40,8 +41,8 @@ enum {
     F_LP1, F_HP1,     // crossover 1: low | mid
     F_LP2, F_HP2,     // crossover 2: mid | mid-high
     F_LP3, F_HP3,     // crossover 3: mid-high | high
-    F_EDGE_LOW,       // high-pass on the low band
-    F_EDGE_HIGH,      // low-pass on the high band
+    F_EDGE_LOW,       // low cut on the input
+    F_EDGE_HIGH,      // high cut on the input
     F_AP2_LOW,        // the low band's share of crossover 2's phase shift
     F_AP3_LOW,        // … and of crossover 3's
     F_AP3_MID,        // the mid band's share of crossover 3's
@@ -61,9 +62,12 @@ struct sc_engine {
     _Atomic int32_t edge_slope[SC_EDGES];
     _Atomic float band_gain[SC_BANDS];
     _Atomic bool band_mute[SC_BANDS];
+    _Atomic bool band_invert[SC_BANDS];
+    _Atomic uint32_t bands_enabled;
 
     // Audio-thread state.
     sc_edge cur_edge[SC_EDGES];   // frequencies as they glide, slopes as running
+    uint32_t cur_enabled;         // bands as running
     bool designed;                // filters match cur_edge at sample_rate
     sc_chain chain[F_COUNT];
     sc_state state[F_COUNT][SC_MAX_SLOT_CHANNELS];
@@ -71,6 +75,7 @@ struct sc_engine {
     float swap_gain;              // 1 normally; dips to 0 while slopes are swapped
     float in_buf[SC_MAX_SLOT_CHANNELS][SC_BLOCK];
     double work[SC_MAX_SLOT_CHANNELS][SC_BLOCK];
+    double input[SC_MAX_SLOT_CHANNELS][SC_BLOCK];
     double band_buf[SC_BANDS][SC_MAX_SLOT_CHANNELS][SC_BLOCK];
 
     // Spectrum display: recent input, mono. Written by the audio thread only.
@@ -183,25 +188,60 @@ static void design(sc_chain *c, int kind, double hz, int slope, double fs, bool 
     if (crossover && kind == KIND_HP && (order % 2) == 1) c->sign = -1.0;
 }
 
-static void design_all(sc_chain chain[F_COUNT], const sc_edge edges[SC_EDGES], double fs) {
-    const sc_edge *x1 = &edges[SC_EDGE_X1], *x2 = &edges[SC_EDGE_X2], *x3 = &edges[SC_EDGE_X3];
-    design(&chain[F_LP1], KIND_LP, x1->hz, x1->slope, fs, true);
-    design(&chain[F_HP1], KIND_HP, x1->hz, x1->slope, fs, true);
-    design(&chain[F_LP2], KIND_LP, x2->hz, x2->slope, fs, true);
-    design(&chain[F_HP2], KIND_HP, x2->hz, x2->slope, fs, true);
-    design(&chain[F_LP3], KIND_LP, x3->hz, x3->slope, fs, true);
-    design(&chain[F_HP3], KIND_HP, x3->hz, x3->slope, fs, true);
+static inline uint32_t clean_mask(uint32_t mask) {
+    mask &= SC_ALL_BANDS;
+    return mask ? mask : SC_ALL_BANDS;
+}
+
+// Crossover k (1..3) sits between band k-1 and the bands from k up. It is
+// active when band k-1 remains and some band from k up remains: the band above a
+// removed one reaches down to take its range. Otherwise it passes everything up
+// (if any band from k up remains) or down.
+enum { XO_ACTIVE, XO_ALL_UP, XO_ALL_DOWN };
+
+static int crossover_mode(uint32_t mask, int k) {
+    const bool above = (mask >> k) != 0;
+    if (above && (mask & (1u << (k - 1)))) return XO_ACTIVE;
+    return above ? XO_ALL_UP : XO_ALL_DOWN;
+}
+
+bool sc_crossover_active(uint32_t mask, int edge) {
+    if (edge < SC_EDGE_X1 || edge > SC_EDGE_X3) return false;
+    return crossover_mode(clean_mask(mask), edge) == XO_ACTIVE;
+}
+
+// One crossover's low-pass, high-pass and matching all-passes. An inactive one
+// passes everything to one side (identity) and nothing to the other (sign 0).
+static void design_crossover(sc_chain *lp, sc_chain *hp, sc_chain *ap[], int aps,
+                             const sc_edge *x, int mode, double fs) {
+    if (mode == XO_ACTIVE) {
+        design(lp, KIND_LP, x->hz, x->slope, fs, true);
+        design(hp, KIND_HP, x->hz, x->slope, fs, true);
+        for (int j = 0; j < aps; j++) design(ap[j], KIND_AP, x->hz, x->slope, fs, true);
+        return;
+    }
+    lp->n = hp->n = 0;
+    lp->sign = mode == XO_ALL_DOWN ? 1.0 : 0.0;
+    hp->sign = mode == XO_ALL_UP ? 1.0 : 0.0;
+    for (int j = 0; j < aps; j++) { ap[j]->n = 0; ap[j]->sign = 1.0; }
+}
+
+static void design_all(sc_chain chain[F_COUNT], const sc_edge edges[SC_EDGES], uint32_t mask, double fs) {
+    mask = clean_mask(mask);
+    sc_chain *none[1] = { NULL };
+    sc_chain *ap2[1] = { &chain[F_AP2_LOW] };
+    sc_chain *ap3[2] = { &chain[F_AP3_LOW], &chain[F_AP3_MID] };
+    design_crossover(&chain[F_LP1], &chain[F_HP1], none, 0, &edges[SC_EDGE_X1], crossover_mode(mask, 1), fs);
+    design_crossover(&chain[F_LP2], &chain[F_HP2], ap2, 1, &edges[SC_EDGE_X2], crossover_mode(mask, 2), fs);
+    design_crossover(&chain[F_LP3], &chain[F_HP3], ap3, 2, &edges[SC_EDGE_X3], crossover_mode(mask, 3), fs);
     design(&chain[F_EDGE_LOW], KIND_HP, edges[SC_EDGE_LOW].hz, edges[SC_EDGE_LOW].slope, fs, false);
     design(&chain[F_EDGE_HIGH], KIND_LP, edges[SC_EDGE_HIGH].hz, edges[SC_EDGE_HIGH].slope, fs, false);
-    design(&chain[F_AP2_LOW], KIND_AP, x2->hz, x2->slope, fs, true);
-    design(&chain[F_AP3_LOW], KIND_AP, x3->hz, x3->slope, fs, true);
-    design(&chain[F_AP3_MID], KIND_AP, x3->hz, x3->slope, fs, true);
 }
 
 // |H(e^jw)| of one filter.
 static double chain_magnitude(const sc_chain *c, double w) {
     const double cw = cos(w), sw = sin(w), c2 = cos(2.0 * w), s2 = sin(2.0 * w);
-    double mag = 1.0;
+    double mag = fabs(c->sign);
     for (int j = 0; j < c->n; j++) {
         const sc_biquad *s = &c->s[j];
         const double nr = s->b0 + s->b1 * cw + s->b2 * c2, ni = -(s->b1 * sw + s->b2 * s2);
@@ -211,8 +251,10 @@ static double chain_magnitude(const sc_chain *c, double w) {
     return mag;
 }
 
-double sc_band_response_db(const sc_edge edges[SC_EDGES], double fs, int band, double hz) {
+double sc_band_response_db(const sc_edge edges[SC_EDGES], uint32_t mask, double fs, int band, double hz) {
     if (!valid_band(band) || !(fs > 0.0)) return -200.0;
+    mask = clean_mask(mask);
+    if (!(mask & (1u << band))) return -200.0;
     if (!(hz > 0.0) || hz >= fs / 2.0) return -200.0;
     sc_edge e[SC_EDGES];
     for (int k = 0; k < SC_EDGES; k++) {
@@ -220,16 +262,15 @@ double sc_band_response_db(const sc_edge edges[SC_EDGES], double fs, int band, d
         if (!valid_slope(k, e[k].slope)) e[k].slope = is_outer(k) ? 0 : 24;
     }
     sc_chain c[F_COUNT];
-    design_all(c, e, fs);
+    design_all(c, e, mask, fs);
     const double w = 2.0 * M_PI * hz / fs;
     // The all-passes don't change the magnitude, so they're left out.
-    double mag;
+    double mag = chain_magnitude(&c[F_EDGE_LOW], w) * chain_magnitude(&c[F_EDGE_HIGH], w);
     switch (band) {
-        case 0:  mag = chain_magnitude(&c[F_LP1], w) * chain_magnitude(&c[F_EDGE_LOW], w); break;
-        case 1:  mag = chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_LP2], w); break;
-        case 2:  mag = chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_HP2], w) * chain_magnitude(&c[F_LP3], w); break;
-        default: mag = chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_HP2], w) * chain_magnitude(&c[F_HP3], w)
-                       * chain_magnitude(&c[F_EDGE_HIGH], w); break;
+        case 0:  mag *= chain_magnitude(&c[F_LP1], w); break;
+        case 1:  mag *= chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_LP2], w); break;
+        case 2:  mag *= chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_HP2], w) * chain_magnitude(&c[F_LP3], w); break;
+        default: mag *= chain_magnitude(&c[F_HP1], w) * chain_magnitude(&c[F_HP2], w) * chain_magnitude(&c[F_HP3], w); break;
     }
     return mag > 1e-10 ? 20.0 * log10(mag) : -200.0;
 }
@@ -250,9 +291,12 @@ sc_engine *sc_engine_create(void) {
         atomic_init(&e->edge_slope[k], default_edges[k].slope);
         e->cur_edge[k] = default_edges[k];
     }
+    atomic_init(&e->bands_enabled, SC_ALL_BANDS);
+    e->cur_enabled = SC_ALL_BANDS;
     for (int b = 0; b < SC_BANDS; b++) {
         atomic_init(&e->band_gain[b], 1.0f);
         atomic_init(&e->band_mute[b], false);
+        atomic_init(&e->band_invert[b], false);
         for (int c = 0; c < SC_MAX_SLOT_CHANNELS; c++) atomic_init(&e->band_peak[b][c], 0.0f);
     }
     for (int c = 0; c < SC_MAX_SLOT_CHANNELS; c++) atomic_init(&e->in_peak[c], 0.0f);
@@ -328,6 +372,12 @@ void sc_engine_set_band_gain(sc_engine *e, int band, float g) {
 }
 void sc_engine_set_band_mute(sc_engine *e, int band, bool m) {
     if (valid_band(band)) atomic_store_explicit(&e->band_mute[band], m, RLX);
+}
+void sc_engine_set_band_invert(sc_engine *e, int band, bool inv) {
+    if (valid_band(band)) atomic_store_explicit(&e->band_invert[band], inv, RLX);
+}
+void sc_engine_set_bands_enabled(sc_engine *e, uint32_t mask) {
+    if (mask & SC_ALL_BANDS) atomic_store_explicit(&e->bands_enabled, mask & SC_ALL_BANDS, RLX);
 }
 
 // ---------------------------------------------------------------------------
@@ -417,7 +467,8 @@ static void run_chain(const sc_chain *c, sc_state *st, double *x, uint32_t n) {
         st->z1[j] = z1;
         st->z2[j] = z2;
     }
-    if (c->n > 0 && c->sign != 1.0)
+    if (c->sign == 0.0) memset(x, 0, n * sizeof(double));
+    else if (c->sign != 1.0)
         for (uint32_t k = 0; k < n; k++) x[k] = -x[k];
 }
 
@@ -460,8 +511,8 @@ static void gather_input(sc_engine *e, const AudioBufferList *in, uint32_t offse
 }
 
 // Moves the running edges toward what the UI asked for. Frequencies glide; a
-// slope change waits until the outputs have faded out (swap_gain reaches 0),
-// then swaps the filters and starts them from rest. Returns the swap gain to
+// slope change (or a band removed or restored) waits until the outputs have
+// faded out (swap_gain reaches 0), then swaps the filters and starts them from rest. Returns the swap gain to
 // ramp to over this block.
 static float update_filters(sc_engine *e, uint32_t n) {
     const double fs = e->sample_rate > 0.0f ? e->sample_rate : 48000.0;
@@ -471,9 +522,12 @@ static float update_filters(sc_engine *e, uint32_t n) {
         want_slope[k] = atomic_load_explicit(&e->edge_slope[k], RLX);
         if (want_slope[k] != e->cur_edge[k].slope) slopes_differ = true;
     }
+    const uint32_t want_enabled = atomic_load_explicit(&e->bands_enabled, RLX);
+    if (want_enabled != e->cur_enabled) slopes_differ = true;
     bool changed = !e->designed;
     if (slopes_differ && e->swap_gain <= 0.0f) {
         for (int k = 0; k < SC_EDGES; k++) e->cur_edge[k].slope = want_slope[k];
+        e->cur_enabled = want_enabled;
         memset(e->state, 0, sizeof e->state);
         slopes_differ = false;
         changed = true;
@@ -490,7 +544,7 @@ static float update_filters(sc_engine *e, uint32_t n) {
         changed = true;
     }
     if (changed) {
-        design_all(e->chain, e->cur_edge, fs);
+        design_all(e->chain, e->cur_edge, e->cur_enabled, fs);
         e->designed = true;
     }
     const float step = (float)n / (SC_SWAP_FADE_S * (float)fs);
@@ -501,8 +555,12 @@ static float update_filters(sc_engine *e, uint32_t n) {
 static void split(sc_engine *e, uint32_t n) {
     for (int c = 0; c < e->in_map.n; c++) {
         double *low = e->band_buf[0][c], *mid = e->band_buf[1][c], *mh = e->band_buf[2][c], *high = e->band_buf[3][c];
-        double *rest = e->work[c];
-        for (uint32_t k = 0; k < n; k++) low[k] = rest[k] = e->in_buf[c][k];
+        double *rest = e->work[c], *x = e->input[c];
+        for (uint32_t k = 0; k < n; k++) x[k] = e->in_buf[c][k];
+        run_chain(&e->chain[F_EDGE_LOW], &e->state[F_EDGE_LOW][c], x, n);
+        run_chain(&e->chain[F_EDGE_HIGH], &e->state[F_EDGE_HIGH][c], x, n);
+        memcpy(low, x, n * sizeof(double));
+        memcpy(rest, x, n * sizeof(double));
         run_chain(&e->chain[F_LP1], &e->state[F_LP1][c], low, n);
         run_chain(&e->chain[F_HP1], &e->state[F_HP1][c], rest, n);
         memcpy(mid, rest, n * sizeof(double));
@@ -513,11 +571,9 @@ static void split(sc_engine *e, uint32_t n) {
         run_chain(&e->chain[F_LP3], &e->state[F_LP3][c], mh, n);
         run_chain(&e->chain[F_HP3], &e->state[F_HP3][c], high, n);
 
-        run_chain(&e->chain[F_EDGE_LOW], &e->state[F_EDGE_LOW][c], low, n);
         run_chain(&e->chain[F_AP2_LOW], &e->state[F_AP2_LOW][c], low, n);
         run_chain(&e->chain[F_AP3_LOW], &e->state[F_AP3_LOW][c], low, n);
         run_chain(&e->chain[F_AP3_MID], &e->state[F_AP3_MID][c], mid, n);
-        run_chain(&e->chain[F_EDGE_HIGH], &e->state[F_EDGE_HIGH][c], high, n);
     }
 }
 
@@ -604,7 +660,11 @@ static void render(sc_engine *e, const AudioBufferList *in, AudioBufferList *out
         gather_input(e, in, offset, n, &missing);
         split(e, n);
         for (int b = 0; b < SC_BANDS; b++) {
-            const float target = atomic_load_explicit(&e->band_mute[b], RLX) ? 0.0f : clean_gain(ldf(&e->band_gain[b]));
+            // A removed band is silenced too; its filters already pass it nothing.
+            // Polarity is the gain's sign, so a flip glides through zero, no click.
+            const bool silent = atomic_load_explicit(&e->band_mute[b], RLX) || !(e->cur_enabled & (1u << b));
+            const float sign = atomic_load_explicit(&e->band_invert[b], RLX) ? -1.0f : 1.0f;
+            const float target = silent ? 0.0f : sign * clean_gain(ldf(&e->band_gain[b]));
             const float g0 = e->cur_gain[b];
             const float g1 = smooth_toward(g0, target, coef);
             e->cur_gain[b] = g1;

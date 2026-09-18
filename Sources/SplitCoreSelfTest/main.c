@@ -128,7 +128,7 @@ static void test_response_matches_engine(void) {
             sine_rms(e, &r, freqs[fi], 0.5, 0.8, 0.4, out, &in);
             for (int b = 0; b < SC_BANDS; b++) {
                 const double measured = db(out[b] / in);
-                const double predicted = sc_band_response_db(ed, FS, b, freqs[fi]);
+                const double predicted = sc_band_response_db(ed, SC_ALL_BANDS, FS, b, freqs[fi]);
                 if (predicted < -70) continue; // below the measurement's noise
                 CHECK(fabs(measured - predicted) < 0.1, "slope %d band %d at %.0f Hz: engine %+.2f dB, display %+.2f dB",
                       slopes[si], b, freqs[fi], measured, predicted);
@@ -148,31 +148,31 @@ static void test_crossover_shapes(void) {
     const int slopes[] = { 12, 24, 36, 48 };
     for (size_t i = 0; i < 4; i++) {
         ed[2].slope = slopes[i];
-        const double lo = sc_band_response_db(ed, FS, 1, 1000), hi = sc_band_response_db(ed, FS, 2, 1000);
+        const double lo = sc_band_response_db(ed, SC_ALL_BANDS, FS, 1, 1000), hi = sc_band_response_db(ed, SC_ALL_BANDS, FS, 2, 1000);
         CHECK(fabs(lo + 6.02) < 0.1 && fabs(hi + 6.02) < 0.1, "LR%d at the crossover: %.2f / %.2f dB", slopes[i] / 6, lo, hi);
     }
     ed[2].slope = 6;
-    CHECK(fabs(sc_band_response_db(ed, FS, 1, 1000) + 3.01) < 0.1, "first order at the crossover: %.2f dB", sc_band_response_db(ed, FS, 1, 1000));
+    CHECK(fabs(sc_band_response_db(ed, SC_ALL_BANDS, FS, 1, 1000) + 3.01) < 0.1, "first order at the crossover: %.2f dB", sc_band_response_db(ed, SC_ALL_BANDS, FS, 1, 1000));
     ed[1].slope = 24;
-    double v = sc_band_response_db(ed, FS, 0, 200);
+    double v = sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 200);
     CHECK(fabs(v + 24.6) < 0.4, "LR4 one octave above 100 Hz: %.2f dB", v);
     ed[1].slope = 48;
-    v = sc_band_response_db(ed, FS, 0, 200);
+    v = sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 200);
     CHECK(fabs(v + 48.2) < 0.4, "LR8 one octave above 100 Hz: %.2f dB", v);
     // In the middle of its range each default band is within 1 dB of flat. (Not
     // exactly flat: 20-100 Hz is only 2.3 octaves, so the two 24 dB skirts overlap.)
     memcpy(ed, defaults, sizeof ed);
     const double centre[SC_BANDS] = { 45, 316, 2236, 10000 };
     for (int b = 0; b < SC_BANDS; b++) {
-        v = sc_band_response_db(ed, FS, b, centre[b]);
+        v = sc_band_response_db(ed, SC_ALL_BANDS, FS, b, centre[b]);
         printf("  default band %d at %.0f Hz: %+.2f dB\n", b, centre[b], v);
         CHECK(v > -1.0 && v < 0.01, "band %d at %.0f Hz: %.2f dB", b, centre[b], v);
     }
     // The subsonic edge cuts the low band below 20 Hz.
-    CHECK(sc_band_response_db(ed, FS, 0, 10) < -20, "low band at 10 Hz: %.2f dB", sc_band_response_db(ed, FS, 0, 10));
+    CHECK(sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 10) < -20, "low band at 10 Hz: %.2f dB", sc_band_response_db(ed, SC_ALL_BANDS, FS, 0, 10));
     // Frequencies past the top are clamped, never unstable.
     ed[4].hz = 40000;
-    v = sc_band_response_db(ed, FS, 3, 10000);
+    v = sc_band_response_db(ed, SC_ALL_BANDS, FS, 3, 10000);
     CHECK(isfinite(v) && fabs(v) < 0.5, "high edge clamped: %.2f dB at 10 kHz", v);
 }
 
@@ -300,6 +300,8 @@ static float max_step_during(sc_engine *e, rig *r, double hz, int callbacks_befo
 static void change_slope(sc_engine *e) { sc_engine_set_edge(e, SC_EDGE_X1, 100, 48); }
 static void jump_frequency(sc_engine *e) { sc_engine_set_edge(e, SC_EDGE_X1, 1500, 24); sc_engine_set_edge(e, SC_EDGE_X2, 3000, 24); }
 static void nothing(sc_engine *e) { (void)e; }
+static void flip_low(sc_engine *e) { sc_engine_set_band_invert(e, 0, true); }
+static void remove_low(sc_engine *e) { sc_engine_set_bands_enabled(e, 0xE); }
 
 // Changing a slope or yanking a frequency never clicks: no step in the output
 // is much bigger than the tone's own steepest step.
@@ -327,6 +329,104 @@ static void test_no_clicks(void) {
     const float glide = max_step_during(e, &r, hz, 200, jump_frequency, 400);
     printf("  frequency jump %.4f\n", glide);
     CHECK(glide < 1.5f * natural, "frequency jump step %.4f", glide);
+    sc_engine_destroy(e);
+}
+
+// Polarity: an inverted band is the same signal upside down, and flipping it
+// glides through zero instead of clicking.
+static void test_polarity(void) {
+    printf("Polarity\n");
+    sc_engine *a = make(1), *b = make(1);
+    rig ra, rb; rig_init(&ra, 1); rig_init(&rb, 1);
+    set_edges(a, defaults); set_edges(b, defaults);
+    sc_engine_set_band_map(a, 0, 1, 0, 0, -1, -1);
+    sc_engine_set_band_map(b, 0, 1, 0, 0, -1, -1);
+    sc_engine_set_band_invert(b, 0, true);
+    double worst = 0, level = 0;
+    for (int cb = 0; cb < 200; cb++) {
+        for (int k = 0; k < FRAMES; k++) ra.in[k] = rb.in[k] = (float)(0.5 * sin(2.0 * M_PI * 60.0 * (cb * FRAMES + k) / FS));
+        run(a, &ra); run(b, &rb);
+        if (cb > 20)
+            for (int k = 0; k < FRAMES; k++) {
+                const double d = fabs((double)ra.out[k * OUT_CH] + rb.out[k * OUT_CH]);
+                if (d > worst) worst = d;
+                if (fabs(ra.out[k * OUT_CH]) > level) level = fabs(ra.out[k * OUT_CH]);
+            }
+    }
+    CHECK(level > 0.3 && worst < 1e-6, "inverted band is exactly the negative (level %.3f, residue %.2g)", level, worst);
+    sc_engine_destroy(a); sc_engine_destroy(b);
+
+    sc_engine *e = make(1);
+    rig r; rig_init(&r, 1);
+    set_edges(e, defaults);
+    sc_engine_set_band_map(e, 0, 1, 0, 0, -1, -1);
+    const float natural = (float)(2.0 * M_PI * 150 * 0.5 / FS);
+    const float step = max_step_during(e, &r, 150, 200, flip_low, 200);
+    CHECK(step < 1.5f * natural, "polarity flip doesn't click (step %.4f)", step);
+    sc_engine_destroy(e);
+}
+
+// Removing bands: the ones left still add up to the input, a removed band is
+// silent, and its range goes to the band above (or below, for the top band).
+static void test_removed_bands(void) {
+    printf("Removed bands\n");
+    const uint32_t masks[] = { 0x5, 0x9, 0xB, 0xD, 0xE, 0x7, 0x3, 0x6, 0x1, 0x8 };
+    const double freqs[] = { 30, 100, 300, 1000, 3000, 5000, 12000 };
+    sc_edge ed[SC_EDGES] = { { 20, 0 }, { 100, 24 }, { 1000, 24 }, { 5000, 24 }, { 20000, 0 } };
+    for (size_t mi = 0; mi < sizeof masks / sizeof *masks; mi++) {
+        sc_engine *e = make(1);
+        rig r; rig_init(&r, 1);
+        set_edges(e, ed);
+        sc_engine_set_bands_enabled(e, masks[mi]);
+        for (int b = 0; b < SC_BANDS; b++) sc_engine_set_band_map(e, b, 1, 0, b, -1, -1);
+        double worst = 0;
+        for (size_t fi = 0; fi < sizeof freqs / sizeof *freqs; fi++) {
+            double out[OUT_CH], in;
+            sine_rms(e, &r, freqs[fi], 0.5, 0.5, 0.3, out, &in);
+            // Each remaining band matches the display; removed bands are silent.
+            for (int b = 0; b < SC_BANDS; b++) {
+                if (!(masks[mi] & (1u << b))) {
+                    CHECK(out[b] == 0.0, "mask %x: removed band %d is silent", masks[mi], b);
+                    continue;
+                }
+                const double predicted = sc_band_response_db(ed, masks[mi], FS, b, freqs[fi]);
+                if (predicted < -70) continue;
+                const double err = fabs(db(out[b] / in) - predicted);
+                if (err > worst) worst = err;
+                CHECK(err < 0.1, "mask %x band %d at %.0f Hz: engine %+.2f, display %+.2f",
+                      masks[mi], b, freqs[fi], db(out[b] / in), predicted);
+            }
+        }
+        sc_engine_destroy(e);
+
+        // And summed onto one channel, flat.
+        e = make(1); rig_init(&r, 1);
+        set_edges(e, ed);
+        sc_engine_set_bands_enabled(e, masks[mi]);
+        for (int b = 0; b < SC_BANDS; b++) sc_engine_set_band_map(e, b, 1, 0, 0, -1, -1);
+        for (size_t fi = 0; fi < sizeof freqs / sizeof *freqs; fi++) {
+            double out[OUT_CH], in;
+            sine_rms(e, &r, freqs[fi], 0.5, 0.5, 0.3, out, &in);
+            CHECK(fabs(db(out[0] / in)) < 0.05, "mask %x: sum at %.0f Hz is %+.3f dB", masks[mi], freqs[fi], db(out[0] / in));
+        }
+        sc_engine_destroy(e);
+    }
+    // Low and Mid-High left: Low keeps its range, Mid-High takes everything above 100 Hz.
+    CHECK(fabs(sc_band_response_db(ed, 0x5, FS, 0, 40)) < 0.5, "low still passes 40 Hz");
+    CHECK(fabs(sc_band_response_db(ed, 0x5, FS, 2, 300)) < 0.5, "mid-high now passes 300 Hz");
+    CHECK(fabs(sc_band_response_db(ed, 0x5, FS, 2, 15000)) < 0.1, "mid-high now passes 15 kHz");
+    CHECK(sc_band_response_db(ed, 0x5, FS, 2, 30) < -20, "mid-high doesn't pass 30 Hz");
+    CHECK(sc_band_response_db(ed, 0x5, FS, 1, 300) <= -200, "removed mid has no response");
+    CHECK(sc_crossover_active(0x5, 1) && !sc_crossover_active(0x5, 2) && !sc_crossover_active(0x5, 3), "only the 100 Hz crossover is active");
+    CHECK(!sc_crossover_active(0xE, 1) && sc_crossover_active(0xE, 2) && sc_crossover_active(0xE, 3), "low removed: its crossover is inactive");
+    // Removing a band doesn't click either.
+    sc_engine *e = make(1);
+    rig r; rig_init(&r, 1);
+    set_edges(e, defaults);
+    sc_engine_set_band_map(e, 1, 1, 0, 0, -1, -1);
+    const float natural = (float)(2.0 * M_PI * 150 * 0.5 / FS);
+    const float step = max_step_during(e, &r, 150, 200, remove_low, 200);
+    CHECK(step < 1.5f * natural, "removing a band doesn't click (step %.4f)", step);
     sc_engine_destroy(e);
 }
 
@@ -436,6 +536,8 @@ int main(void) {
     test_gain_and_mute();
     test_no_clicks();
     test_glide_lands();
+    test_polarity();
+    test_removed_bands();
     test_garbage_and_safety();
     test_bad_maps();
     test_meters_and_scope();
